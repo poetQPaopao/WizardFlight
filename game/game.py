@@ -12,6 +12,7 @@ from .constants import (
 from .level import build_walls
 from .entities import Player, Enemy, Bullet, Fireball, Icebolt
 from .collision import move_entity
+from .controller import Controller
 
 
 def draw_text(surface, text, size, x, y, color=WHITE):
@@ -44,6 +45,7 @@ class Game:
         self.last_shot_time = 0
 
         self.game_over = False
+        self.controller = Controller()
 
     def reset(self):
         from .constants import PLAYER_HP
@@ -178,6 +180,10 @@ class Game:
                     sys.exit()
 
             keys = pygame.key.get_pressed()
+            controller = self.controller
+            if controller:
+                command = controller.get_command()
+                print(f"Command received: {command}")
             if self.game_over:
                 if keys[pygame.K_r]:
                     self.reset()

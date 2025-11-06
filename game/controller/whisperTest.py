@@ -3,15 +3,15 @@ import threading
 import time
 import assemblyai as aai
 from assemblyai.streaming.v3 import (
-	BeginEvent,
-	StreamingClient,
-	StreamingClientOptions,
-	StreamingError,
-	StreamingEvents,
-	StreamingParameters,
-	StreamingSessionParameters,
-	TerminationEvent,
-	TurnEvent,
+    BeginEvent,
+    StreamingClient,
+    StreamingClientOptions,
+    StreamingError,
+    StreamingEvents,
+    StreamingParameters,
+    StreamingSessionParameters,
+    TerminationEvent,
+    TurnEvent,
 )
 import logging
 from typing import Type
@@ -32,8 +32,8 @@ def on_begin(self: Type[StreamingClient], event: BeginEvent):
 def on_turn(self: Type[StreamingClient], event: TurnEvent):
 	# Print only when we have text; label partial vs final
 	if event.transcript:
-		tag = "final" if event.end_of_turn else "partial"
-		print(f"[{tag}] {event.transcript}")
+		stage = "final" if event.end_of_turn else "partial"
+		print(f"[{stage}] {event.transcript}")
 		global last_transcript_time
 		last_transcript_time = time.time()
 
