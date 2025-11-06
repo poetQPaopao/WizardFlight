@@ -2,17 +2,11 @@
 """Level definition and wall generation"""
 import pygame
 from .constants import TILE_SIZE
+import random
 
 # Map layout for obstacles (1 means a wall)
-LEVEL_MAP = [
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,1,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0],
-    [0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0],
-    [0,1,0,1,1,1,0,0,0,0,0,0,0,0,0,1,1,1,1,0],
-    [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-]
+object_Count = 0.15
+LEVEL_MAP = [[1 if random.random() < object_Count else 0 for x in range(20)] for y in range(15)]
 
 def build_walls(level_map=LEVEL_MAP):
     walls = []

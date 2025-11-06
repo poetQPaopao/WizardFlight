@@ -10,7 +10,7 @@ from .constants import (
     FIRE_COOLDOWN_MS,
 )
 from .level import build_walls
-from .entities import Player, Enemy, Bullet
+from .entities import Player, Enemy, Bullet, Fireball, Icebolt
 from .collision import move_entity
 
 
@@ -29,7 +29,7 @@ class Game:
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
-        pygame.display.set_caption("Block Shooter")
+        pygame.display.set_caption("Wizard Flight")
         self.clock = pygame.time.Clock()
 
         # Map & walls
@@ -52,19 +52,17 @@ class Game:
         self.bullets.clear()
         self.game_over = False
 
-    def shoot(self, target):
-        now = pygame.time.get_ticks()
-        if now - self.last_shot_time < FIRE_COOLDOWN_MS:
+    def _shoot_toward(self, target, make_bullet_fn):
+        """Create a projectile toward target if any."""
+        if not target:
             return
-        self.last_shot_time = now
-
         dx = target.rect.centerx - self.player.rect.centerx
         dy = target.rect.centery - self.player.rect.centery
         dist = math.hypot(dx, dy)
         if dist == 0:
             return
         vx, vy = dx / dist, dy / dist
-        self.bullets.append(Bullet(self.player.rect.centerx, self.player.rect.centery, vx, vy))
+        self.bullets.append(make_bullet_fn(self.player.rect.centerx, self.player.rect.centery, vx, vy))
 
     def update_bullets(self):
         from .constants import WIDTH, HEIGHT
@@ -87,7 +85,13 @@ class Game:
             for e in self.enemies:
                 if b.rect.colliderect(e.rect):
                     self.bullets.remove(b)
-                    e.hp -= 20
+                    # Immediate impact damage
+                    e.hp -= getattr(b, "damage", 20)
+                    # Apply projectile-specific status effects
+                    if isinstance(b, Fireball):
+                        e.ignite()
+                    elif isinstance(b, Icebolt):
+                        e.slow()
                     if e.hp <= 0:
                         self.enemies.remove(e)
                     break
@@ -104,13 +108,37 @@ class Game:
             self.game_over = True
 
     def handle_input(self):
+        from .constants import HEAL_AMOUNT, HEAL_COOLDOWN_MS, PLAYER_HP
         keys = pygame.key.get_pressed()
         self.player.move(keys, self.walls)
 
-        # Auto-shoot the nearest enemy
+        # Auto-aim only (no auto-fire)
         target = auto_target_enemy(self.enemies, self.player.rect)
-        if target:
-            self.shoot(target)
+
+        # Manual fire: j=normal bullet, k=fireball, l=icebolt
+        def cd_ready():
+            now = pygame.time.get_ticks()
+            return (now - self.last_shot_time) >= FIRE_COOLDOWN_MS
+
+        if keys[pygame.K_j] and cd_ready():
+            self.last_shot_time = pygame.time.get_ticks()
+            self._shoot_toward(target, lambda x, y, vx, vy: Bullet(x, y, vx, vy, damage=12))
+
+        if keys[pygame.K_k] and cd_ready():
+            self.last_shot_time = pygame.time.get_ticks()
+            self._shoot_toward(target, lambda x, y, vx, vy: Fireball(x, y, vx, vy, damage=8))
+
+        if keys[pygame.K_l] and cd_ready():
+            self.last_shot_time = pygame.time.get_ticks()
+            self._shoot_toward(target, lambda x, y, vx, vy: Icebolt(x, y, vx, vy, damage=6))
+
+        if keys[pygame.K_h]:
+            now = pygame.time.get_ticks()
+            if not hasattr(self, 'last_heal_time'):
+                self.last_heal_time = 0
+            if (now - self.last_heal_time) >= HEAL_COOLDOWN_MS and self.player.hp > 0:
+                self.player.hp = min(PLAYER_HP, self.player.hp + HEAL_AMOUNT)
+                self.last_heal_time = now
 
     def draw(self):
         self.screen.fill(BLACK)
@@ -118,6 +146,19 @@ class Game:
             pygame.draw.rect(self.screen, GRAY, wall)
         for e in self.enemies:
             pygame.draw.rect(self.screen, RED, e.rect)
+            # Simple burn visual: a small yellow overlay if burning
+            try:
+                if e.is_burning():
+                    inner = e.rect.inflate(-e.rect.width * 0.4, -e.rect.height * 0.4)
+                    pygame.draw.rect(self.screen, YELLOW, inner)
+            except AttributeError:
+                pass
+            # Slow visual: thin blue outline if slowed
+            try:
+                if e.is_slowed():
+                    pygame.draw.rect(self.screen, BLUE, e.rect, width=2)
+            except AttributeError:
+                pass
         for b in self.bullets:
             pygame.draw.rect(self.screen, YELLOW, b.rect)
         pygame.draw.rect(self.screen, BLUE, self.player.rect)
