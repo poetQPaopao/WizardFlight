@@ -3,8 +3,8 @@
 from .constants import WIDTH, HEIGHT
 
 
-def move_entity(rect, dx, dy, walls):
-    """Axis-aligned collision resolution: move X, then Y; finally clamp to screen bounds."""
+def move_entity(rect, dx, dy, walls, clamp_horizontal=True, clamp_vertical=True):
+    """Axis-aligned collision resolution with optional horizontal/vertical screen clamping."""
     # X-axis movement
     rect.x += dx
     for wall in walls:
@@ -24,11 +24,13 @@ def move_entity(rect, dx, dy, walls):
                 rect.top = wall.bottom
     
     # Screen boundary clamp
-    if rect.left < 0:
-        rect.left = 0
-    if rect.right > WIDTH:
-        rect.right = WIDTH
-    if rect.top < 0:
-        rect.top = 0
-    if rect.bottom > HEIGHT:
-        rect.bottom = HEIGHT
+    if clamp_horizontal:
+        if rect.left < 0:
+            rect.left = 0
+        if rect.right > WIDTH:
+            rect.right = WIDTH
+    if clamp_vertical:
+        if rect.top < 0:
+            rect.top = 0
+        if rect.bottom > HEIGHT:
+            rect.bottom = HEIGHT

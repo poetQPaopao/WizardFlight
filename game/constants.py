@@ -4,6 +4,11 @@
 WIDTH, HEIGHT = 800, 600
 TILE_SIZE = 40
 
+# Scrolling parameters
+SCROLL_SPEED = 2
+SCROLL_BUFFER_ROWS = 6  # how many extra tile rows exist above the top of the screen
+WALL_DENSITY = 0.1     # probability that a tile in a row becomes an obstacle
+
 # Color definitions (R, G, B)
 BLACK = (0, 0, 0)
 BLUE = (0, 150, 255)
@@ -20,6 +25,8 @@ ENEMY_COUNT = 5
 ENEMY_HP = 50
 ENEMY_SPEED = 2
 ENEMY_DAMAGE = 10
+ENEMY_SPAWN_MIN_Y = -600
+ENEMY_SPAWN_MAX_Y = -TILE_SIZE
 
 # Bullet parameters
 BULLET_SPEED = 8

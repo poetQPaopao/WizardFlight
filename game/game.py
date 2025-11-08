@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import sys
 import math
+import random
 import pygame
 
 from .constants import (
@@ -8,10 +9,10 @@ from .constants import (
     BLACK, BLUE, GRAY, RED, YELLOW, WHITE,
     ENEMY_COUNT,
     FIRE_COOLDOWN_MS,
+    SCROLL_SPEED,
 )
-from .level import build_walls
+from .level import build_walls, create_row
 from .entities import Player, Enemy, Bullet, Fireball, Icebolt
-from .collision import move_entity
 from .controller import Controller
 
 
@@ -23,7 +24,9 @@ def draw_text(surface, text, size, x, y, color=WHITE):
 def auto_target_enemy(enemies, player_rect):
     if not enemies:
         return None
-    return min(enemies, key=lambda e: (e.rect.centerx - player_rect.centerx) ** 2 + (e.rect.centery - player_rect.centery) ** 2)
+    visible = [e for e in enemies if e.rect.bottom > 0]
+    candidates = visible if visible else enemies
+    return min(candidates, key=lambda e: (e.rect.centerx - player_rect.centerx) ** 2 + (e.rect.centery - player_rect.centery) ** 2)
 
 
 class Game:
@@ -35,14 +38,21 @@ class Game:
 
         # Map & walls
         self.walls = build_walls()
+        self.next_row_y = min((wall.y for wall in self.walls), default=0) - TILE_SIZE
 
         # Player & enemies
-        self.player = Player(100, 100)
-        self.enemies = [Enemy() for _ in range(ENEMY_COUNT)]
+        self.player = Player(WIDTH // 2 - TILE_SIZE // 2, HEIGHT - TILE_SIZE * 2)
+        self.enemies = []
+        self._seed_enemies()
 
         # Bullets & cooldown
         self.bullets = []
         self.last_shot_time = 0
+
+        # Scrolling state
+        self.scroll_speed = SCROLL_SPEED
+        self.scroll_accumulator = 0
+        self.distance = 0
 
         self.game_over = False
         self.controller = Controller()
@@ -50,8 +60,16 @@ class Game:
     def reset(self):
         from .constants import PLAYER_HP
         self.player.hp = PLAYER_HP
-        self.enemies = [Enemy() for _ in range(ENEMY_COUNT)]
+        self.player.rect.x = WIDTH // 2 - TILE_SIZE // 2
+        self.player.rect.y = HEIGHT - TILE_SIZE * 2
+        self.walls = build_walls()
+        self.next_row_y = min((wall.y for wall in self.walls), default=0) - TILE_SIZE
+        self.enemies.clear()
+        self._seed_enemies()
         self.bullets.clear()
+        self.scroll_accumulator = 0
+        self.distance = 0
+        self.last_shot_time = 0
         self.game_over = False
 
     def _shoot_toward(self, target, make_bullet_fn):
@@ -65,6 +83,48 @@ class Game:
             return
         vx, vy = dx / dist, dy / dist
         self.bullets.append(make_bullet_fn(self.player.rect.centerx, self.player.rect.centery, vx, vy))
+
+    def _spawn_enemy(self, *, in_view=False):
+        enemy = Enemy()
+        if in_view:
+            enemy.rect.y = random.randint(TILE_SIZE, HEIGHT // 2)
+        return enemy
+
+    def _seed_enemies(self):
+        visible_count = max(1, ENEMY_COUNT // 2)
+        for idx in range(ENEMY_COUNT):
+            self.enemies.append(self._spawn_enemy(in_view=idx < visible_count))
+
+    def ensure_enemy_count(self):
+        while len(self.enemies) < ENEMY_COUNT:
+            self.enemies.append(self._spawn_enemy())
+
+    def spawn_wall_row(self):
+        row = create_row(self.next_row_y)
+        self.walls.extend(row)
+        self.next_row_y -= TILE_SIZE
+
+    def scroll_world(self):
+        """Push the entire world downward to create the vertical scrolling effect."""
+        self.distance += self.scroll_speed
+        self.scroll_accumulator += self.scroll_speed
+
+        for wall in self.walls:
+            wall.y += self.scroll_speed
+        for enemy in self.enemies:
+            enemy.rect.y += self.scroll_speed
+        for bullet in self.bullets:
+            bullet.rect.y += self.scroll_speed
+
+        self.walls = [wall for wall in self.walls if wall.y < HEIGHT]
+        self.enemies = [enemy for enemy in self.enemies if enemy.rect.top < HEIGHT]
+        self.bullets = [bullet for bullet in self.bullets if bullet.rect.bottom > 0]
+
+        while self.scroll_accumulator >= TILE_SIZE:
+            self.scroll_accumulator -= TILE_SIZE
+            self.spawn_wall_row()
+
+        self.ensure_enemy_count()
 
     def update_bullets(self):
         from .constants import WIDTH, HEIGHT
@@ -100,8 +160,11 @@ class Game:
 
     def update_enemies(self):
         # Enemies chase player + collisions + damage
-        for e in self.enemies:
+        for e in self.enemies[:]:
             e.update(self.player.rect, self.walls)
+            if e.hp <= 0:
+                self.enemies.remove(e)
+                continue
             if e.rect.colliderect(self.player.rect):
                 self.player.hp -= e.damage
                 e.knockback_from(self.player.rect, self.walls)
@@ -144,6 +207,11 @@ class Game:
 
     def draw(self):
         self.screen.fill(BLACK)
+        lane_color = (30, 30, 30)
+        offset = int(self.scroll_accumulator)
+        for y in range(-TILE_SIZE, HEIGHT + TILE_SIZE, TILE_SIZE):
+            line_y = y + offset
+            pygame.draw.line(self.screen, lane_color, (0, line_y), (WIDTH, line_y), 1)
         for wall in self.walls:
             pygame.draw.rect(self.screen, GRAY, wall)
         for e in self.enemies:
@@ -165,6 +233,7 @@ class Game:
             pygame.draw.rect(self.screen, YELLOW, b.rect)
         pygame.draw.rect(self.screen, BLUE, self.player.rect)
         draw_text(self.screen, f"HP: {self.player.hp}", 30, 10, 10)
+        draw_text(self.screen, f"Distance: {self.distance // TILE_SIZE}", 24, 10, 40)
 
         if self.game_over:
             draw_text(self.screen, "GAME OVER", 60, WIDTH // 2 - 150, HEIGHT // 2 - 30, RED)
@@ -188,6 +257,7 @@ class Game:
                 if keys[pygame.K_r]:
                     self.reset()
             else:
+                self.scroll_world()
                 self.handle_input()
                 self.update_bullets()
                 self.update_enemies()

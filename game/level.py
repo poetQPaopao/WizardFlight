@@ -1,17 +1,32 @@
 # -*- coding: utf-8 -*-
-"""Level definition and wall generation"""
-import pygame
-from .constants import TILE_SIZE
+"""Procedural wall generation for the endless vertical level."""
 import random
+import pygame
 
-# Map layout for obstacles (1 means a wall)
-object_Count = 0.15
-LEVEL_MAP = [[1 if random.random() < object_Count else 0 for x in range(20)] for y in range(15)]
+from .constants import (
+    TILE_SIZE,
+    WIDTH,
+    HEIGHT,
+    SCROLL_BUFFER_ROWS,
+    WALL_DENSITY,
+)
 
-def build_walls(level_map=LEVEL_MAP):
+
+def create_row(y: int, density: float = WALL_DENSITY):
+    """Create a horizontal row of walls positioned at world coordinate y."""
     walls = []
-    for y, row in enumerate(level_map):
-        for x, tile in enumerate(row):
-            if tile == 1:
-                walls.append(pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE))
+    columns = WIDTH // TILE_SIZE
+    for col in range(columns):
+        if random.random() < density:
+            walls.append(pygame.Rect(col * TILE_SIZE, y, TILE_SIZE, TILE_SIZE))
+    return walls
+
+
+def build_walls(buffer_rows: int = SCROLL_BUFFER_ROWS):
+    """Build the initial set of walls covering the screen plus an off-screen buffer."""
+    walls = []
+    y = -buffer_rows * TILE_SIZE
+    while y < HEIGHT:
+        walls.extend(create_row(y))
+        y += TILE_SIZE
     return walls

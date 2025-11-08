@@ -4,12 +4,15 @@ import math
 import random
 import pygame
 from .constants import (
+    WIDTH,
     TILE_SIZE,
     PLAYER_SPEED,
     PLAYER_HP,
     ENEMY_HP,
     ENEMY_SPEED,
     ENEMY_DAMAGE,
+    ENEMY_SPAWN_MIN_Y,
+    ENEMY_SPAWN_MAX_Y,
     BULLET_SIZE,
     BULLET_SPEED,
     BURN_DURATION_MS,
@@ -42,9 +45,9 @@ class Player:
 class Enemy:
     def __init__(self, x=None, y=None):
         if x is None:
-            x = random.randint(200, 700)
+            x = random.randint(TILE_SIZE, WIDTH - TILE_SIZE)
         if y is None:
-            y = random.randint(100, 500)
+            y = random.randint(ENEMY_SPAWN_MIN_Y, ENEMY_SPAWN_MAX_Y)
         self.rect = pygame.Rect(x, y, TILE_SIZE, TILE_SIZE)
         self.hp = float(ENEMY_HP)
         self.speed = ENEMY_SPEED
@@ -65,7 +68,7 @@ class Enemy:
             spd = self.get_speed()
             step_x = spd * dx / dist
             step_y = spd * dy / dist
-            move_entity(self.rect, step_x, step_y, walls)
+            move_entity(self.rect, step_x, step_y, walls, clamp_vertical=False)
         # Tick burn damage over time
         self._tick_burn()
 
@@ -76,7 +79,7 @@ class Enemy:
         if dist > 0:
             back_x = -self.speed * dx / dist
             back_y = -self.speed * dy / dist
-            move_entity(self.rect, back_x, back_y, walls)
+            move_entity(self.rect, back_x, back_y, walls, clamp_vertical=False)
 
     # --- Burn mechanics ---
     def ignite(self, duration_ms: int = BURN_DURATION_MS, dps: float = BURN_DPS):
@@ -151,5 +154,4 @@ class Icebolt(Bullet):
     def __init__(self, x, y, vx, vy, damage=8):
         super().__init__(x, y, vx, vy, damage)
         self.effect = "slow"
-
 
