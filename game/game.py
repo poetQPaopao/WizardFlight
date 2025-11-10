@@ -116,6 +116,11 @@ class Game:
         for bullet in self.bullets:
             bullet.rect.y += self.scroll_speed
 
+        # After shifting walls downward they may now overlap the player/enemies.
+        # Because the scroll is conceptually the world moving down (as if the
+        # player is flying upward), any new overlaps should push entities UP.
+        self._resolve_scroll_collisions()
+
         self.walls = [wall for wall in self.walls if wall.y < HEIGHT]
         self.enemies = [enemy for enemy in self.enemies if enemy.rect.top < HEIGHT]
         self.bullets = [bullet for bullet in self.bullets if bullet.rect.bottom > 0]
@@ -125,6 +130,34 @@ class Game:
             self.spawn_wall_row()
 
         self.ensure_enemy_count()
+
+    def _resolve_scroll_collisions(self):
+        """Resolve wall overlaps introduced by vertical scrolling.
+
+        Scrolling moves static geometry (walls) downward without using the
+        normal collision resolution path, so walls can end up overlapping the
+        player or enemies. We separate them by pushing dynamic entities upward
+        (opposite scroll direction) until no longer colliding for that wall.
+        This preserves the expected solid-wall behavior so the player cannot
+        be engulfed by a descending wall row.
+        """
+        # Player first
+        for wall in self.walls:
+            if self.player.rect.colliderect(wall):
+                # Wall came from above (moved down). Place player just above it.
+                if self.player.rect.centery <= wall.centery:
+                    self.player.rect.bottom = wall.top
+                else:
+                    # If somehow wall is below (rare), put player on bottom side.
+                    self.player.rect.top = wall.bottom
+        # Enemies
+        for enemy in self.enemies:
+            for wall in self.walls:
+                if enemy.rect.colliderect(wall):
+                    if enemy.rect.centery <= wall.centery:
+                        enemy.rect.bottom = wall.top
+                    else:
+                        enemy.rect.top = wall.bottom
 
     def update_bullets(self):
         from .constants import WIDTH, HEIGHT
