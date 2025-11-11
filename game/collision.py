@@ -1,10 +1,15 @@
 # -*- coding: utf-8 -*-
 """Generic collision movement and screen boundary clamping"""
-from .constants import WIDTH, HEIGHT
+from .constants import WIDTH, HEIGHT, TILE_SIZE
 
 
 def move_entity(rect, dx, dy, walls, clamp_horizontal=True, clamp_vertical=True):
-    """Axis-aligned collision resolution with optional horizontal/vertical screen clamping."""
+    """Axis-aligned movement with collision resolution and optional screen clamping.
+
+    Optimization: walls are tile-aligned; we can early exit scans by localizing
+    candidate walls. For now keep the simple loop but document potential future
+    improvements (spatial hashing / uniform grid) in comments.
+    """
     # X-axis movement
     rect.x += dx
     for wall in walls:

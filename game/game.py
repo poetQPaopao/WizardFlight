@@ -205,7 +205,7 @@ class Game:
         if self.player.hp <= 0:
             self.game_over = True
 
-    def handle_input(self):
+    def handle_input(self, command: str = ""):
         from .constants import HEAL_AMOUNT, HEAL_COOLDOWN_MS, PLAYER_HP
         keys = pygame.key.get_pressed()
         self.player.move(keys, self.walls)
@@ -237,6 +237,24 @@ class Game:
             if (now - self.last_heal_time) >= HEAL_COOLDOWN_MS and self.player.hp > 0:
                 self.player.hp = min(PLAYER_HP, self.player.hp + HEAL_AMOUNT)
                 self.last_heal_time = now
+
+        # Voice commands mapping (if any): fire -> Fireball, freeze -> Icebolt, heal -> heal
+        if command:
+            cmd = command.strip().lower()
+            # Shoot spells respect the same cooldown
+            if ("fire" in cmd) and cd_ready():
+                self.last_shot_time = pygame.time.get_ticks()
+                self._shoot_toward(target, lambda x, y, vx, vy: Fireball(x, y, vx, vy, damage=8))
+            elif ("freeze" in cmd) and cd_ready():
+                self.last_shot_time = pygame.time.get_ticks()
+                self._shoot_toward(target, lambda x, y, vx, vy: Icebolt(x, y, vx, vy, damage=6))
+            if "heal" in cmd:
+                now = pygame.time.get_ticks()
+                if not hasattr(self, 'last_heal_time'):
+                    self.last_heal_time = 0
+                if (now - self.last_heal_time) >= HEAL_COOLDOWN_MS and self.player.hp > 0:
+                    self.player.hp = min(PLAYER_HP, self.player.hp + HEAL_AMOUNT)
+                    self.last_heal_time = now
 
     def draw(self):
         self.screen.fill(BLACK)
@@ -291,7 +309,7 @@ class Game:
                     self.reset()
             else:
                 self.scroll_world()
-                self.handle_input()
+                self.handle_input(command)
                 self.update_bullets()
                 self.update_enemies()
 
