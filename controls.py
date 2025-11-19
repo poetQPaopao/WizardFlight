@@ -41,7 +41,7 @@ class ControlScheme:
             down=pygame.K_DOWN,
             left=pygame.K_LEFT,
             right=pygame.K_RIGHT,
-            cast=pygame.K_RCTRL,
+            cast=pygame.K_RSHIFT,
         )
 
 

@@ -3,20 +3,22 @@ from __future__ import annotations
 from .base_spell import BaseSpell
 from .behaviors import BoundsBehavior, CollisionBehavior, LinearMovementBehavior, LifetimeBehavior
 from .core import SpellDefinition, SpellStats
-from .effects import BurnEffect, DamageEffect, KnockbackEffect, SlowEffect
-from .visuals import SimpleOrbVisual
+from .effects import BurnEffect, DamageEffect, KnockbackEffect, SlowEffect, FrozenEffect
+from .visuals import SimpleOrbVisual, SpriteSpellVisual
 
 
 def build_fire_bolt() -> SpellDefinition:
-    stats = SpellStats(damage=22.0, speed=520.0, cost=25.0, radius=10.0, lifetime=1.5, cooldown=0.45)
+    stats = SpellStats(damage=22.0, speed=520.0, cost=25.0, radius=50.0, lifetime=1.5, cooldown=0.45)
     base = BaseSpell(
         name="Fire Bolt",
         stats=stats,
         effect_factory=lambda: [
             DamageEffect(stats.damage),
             BurnEffect(duration=2.5, dps=8.0),
+            KnockbackEffect(force=180.0),
+            FrozenEffect(duration=1.0)
         ],
-        visual_factory=lambda: SimpleOrbVisual(color=(255, 140, 60), trail_color=(255, 210, 160)),
+        visual_factory=lambda: SpriteSpellVisual("output.jpg"),
     )
     return base.to_definition()
 

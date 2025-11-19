@@ -3,7 +3,7 @@ from __future__ import annotations
 import pygame
 
 from player import Player
-from status_effects import BurningStatus, SlowStatus
+from status_effects import BurningStatus, SlowStatus, FrozenStatus
 
 from .core import Spell
 
@@ -54,3 +54,12 @@ class SlowEffect(SpellEffect):
         if self.duration <= 0 or self.slow_fraction <= 0:
             return
         target.add_status(SlowStatus(self.duration, self.slow_fraction))
+
+class FrozenEffect(SpellEffect):
+    def __init__(self, duration: float) -> None:
+        self.duration = max(0.0, duration)
+
+    def apply(self, spell: Spell, target: Player) -> None:
+        if self.duration <= 0:
+            return
+        target.add_status(FrozenStatus(self.duration))

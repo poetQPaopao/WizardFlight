@@ -8,7 +8,6 @@ from player import Player
 
 from .core import Spell, SpellDefinition
 
-
 class SpellCaster:
     """Handles cooldowns and input for a single equipped spell."""
 

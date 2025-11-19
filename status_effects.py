@@ -44,6 +44,16 @@ class SlowStatus(StatusEffect):
         multiplier = max(0.05, 1.0 - self.slow_fraction)
         player.apply_speed_multiplier(multiplier)
 
+class FrozenStatus(StatusEffect):
+    """Completely immobilizes the player for the duration."""
+
+    def __init__(self, duration: float) -> None:
+        super().__init__(duration)
+
+    def apply(self, player: "Player", dt: float) -> None:  # pragma: no cover - dt unused
+        del dt
+        player.apply_speed_multiplier(0.0)
+
 
 # Late import to avoid circular dependency during type checking.
 from typing import TYPE_CHECKING
