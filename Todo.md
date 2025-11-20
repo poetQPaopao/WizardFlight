@@ -1,6 +1,7 @@
 # Todo List
 ## Prototype B
 - Voice Detection -> Spell Casting
+    - Audio input seperately for 2 player.
     - spell_book.py make dictionary for spell name for casting?
     - Change casting mechanic (from false/true to str value)
 - Add death and game loop

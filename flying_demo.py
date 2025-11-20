@@ -6,7 +6,8 @@ from typing import Optional, Sequence
 import pygame
 from controls import ControlScheme, PoseControlSystem, PoseKeyState
 from player import Player
-from spell_system import SpellManager, SpellCaster, default_spellbook
+from spell_system import SpellCaster, SpellManager, default_spellbook, match_voice_command
+from audio import AudioListener
 
 SCREEN_SIZE = (1280, 720)
 BACKGROUND = (18, 18, 28)
@@ -62,6 +63,11 @@ class FlyingDemoGame:
         self.pose_system = PoseControlSystem(max_players=len(self.players)) if use_pose_input else None
         self.running = True
         self._pressed: Optional[Sequence[bool]] = None
+        self.AudioListener = AudioListener()
+        self.AudioListener.start()
+        self._pending_voice_spell: Optional[str] = None
+        self._voice_blocked = False
+        self._voice_last_partial = ""
 
     def _create_players(self) -> list[Player]:
         return [
@@ -87,6 +93,7 @@ class FlyingDemoGame:
         for idx in range(len(self.players)):
             definition = spell_defs[idx % len(spell_defs)]
             casters.append(SpellCaster(definition))
+            
         return casters
 
     def run(self) -> None:
@@ -121,6 +128,33 @@ class FlyingDemoGame:
             if self.pose_system.quit_requested:
                 self.running = False
                 return
+        if self.AudioListener:
+            final_text = self.AudioListener.consume_final()
+            if final_text:
+                print(f"[voice] transcript: {final_text}")
+                if not self._voice_blocked:
+                    spell_name = match_voice_command(final_text)
+                    if spell_name:
+                        print(f"[voice] matched spell: {spell_name}")
+                        self._pending_voice_spell = spell_name
+                        self._voice_blocked = True
+
+            partial_text = self.AudioListener.command
+            stage = self.AudioListener.command_stage
+            if stage != "final" and partial_text:
+                if partial_text != self._voice_last_partial:
+                    print(f"[voice] partial: {partial_text}")
+                    self._voice_last_partial = partial_text
+                    if not self._voice_blocked:
+                        spell_name = match_voice_command(partial_text)
+                        if spell_name:
+                            print(f"[voice] matched spell: {spell_name}")
+                            self._pending_voice_spell = spell_name
+                            self._voice_blocked = True
+            elif not partial_text and stage != "final":
+                self._voice_last_partial = ""
+                self._voice_blocked = False
+
 
         for idx, player in enumerate(self.players):
             overrides: dict[int, bool] = {}
@@ -133,6 +167,10 @@ class FlyingDemoGame:
             caster = self.player_spellcasters[idx]
             caster.update(dt)
             pressed_cast = bool(pressed_for_player[player.controls.cast])
+            if self._pending_voice_spell and caster.definition.name.lower() == self._pending_voice_spell.lower():
+                pressed_cast = True
+                # consume after applying to allow one cast per detection
+                self._pending_voice_spell = None
             caster.handle_input(pressed_cast, player, self.spell_manager)
 
         self.spell_manager.update(dt, self.players)
@@ -148,6 +186,8 @@ class FlyingDemoGame:
     def _shutdown(self) -> None:
         if self.pose_system:
             self.pose_system.shutdown()
+        if self.AudioListener and self.AudioListener.running:
+            self.AudioListener.stop()
         pygame.quit()
 
 
