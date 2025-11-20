@@ -68,6 +68,7 @@ class FlyingDemoGame:
         self._pending_voice_spell: Optional[str] = None
         self._voice_blocked = False
         self._voice_last_partial = ""
+        self._voice_prev_stage = ""
 
     def _create_players(self) -> list[Player]:
         return [
@@ -140,7 +141,10 @@ class FlyingDemoGame:
                         self._voice_blocked = True
 
             partial_text = self.AudioListener.command
-            stage = self.AudioListener.command_stage
+            stage = self.AudioListener.command_stage or ""
+            if stage != "final" and self._voice_prev_stage == "final":
+                self._voice_blocked = False
+                self._voice_last_partial = ""
             if stage != "final" and partial_text:
                 if partial_text != self._voice_last_partial:
                     print(f"[voice] partial: {partial_text}")
@@ -154,6 +158,7 @@ class FlyingDemoGame:
             elif not partial_text and stage != "final":
                 self._voice_last_partial = ""
                 self._voice_blocked = False
+            self._voice_prev_stage = stage
 
 
         for idx, player in enumerate(self.players):
