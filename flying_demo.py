@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from enum import Enum, auto
 from typing import Optional, Sequence
 
 import pygame
@@ -46,6 +47,11 @@ def draw_health(surface: pygame.Surface, players: Sequence[Player], font: pygame
         surface.blit(mana_label, mana_pos)
 
 
+class GameState(Enum):
+    RUNNING = auto()
+    GAME_OVER = auto()
+
+
 class FlyingDemoGame:
     """Encapsulates the pygame setup, main loop, and pose input plumbing."""
 
@@ -56,19 +62,28 @@ class FlyingDemoGame:
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("Inter", 20)
         self.world_bounds = self.screen.get_rect().inflate(-BOUNDS_PADDING * 2, -BOUNDS_PADDING * 2)
-        self.players = self._create_players()
-        self.player_sprites = pygame.sprite.Group(*self.players)
-        self.spell_manager = SpellManager(self.world_bounds)
-        self.player_spellcasters = self._build_spellcasters()
-        self.pose_system = PoseControlSystem(max_players=len(self.players)) if use_pose_input else None
+        self.players: list[Player] = []
+        self.player_sprites = pygame.sprite.Group()
+        self.player_spellcasters: list[SpellCaster] = []
+        self.spell_manager: SpellManager = SpellManager(self.world_bounds)
+        self.pose_system = None
         self.running = True
         self._pressed: Optional[Sequence[bool]] = None
         self.AudioListener = AudioListener()
         self.AudioListener.start()
+        self.game_state = GameState.RUNNING
+        self._winner_name: Optional[str] = None
+        self._round_time = 0.0
         self._pending_voice_spell: Optional[str] = None
         self._voice_blocked = False
         self._voice_last_partial = ""
         self._voice_prev_stage = ""
+        self._voice_last_reason = ""
+        self._initialize_round()
+        if use_pose_input:
+            self.pose_system = PoseControlSystem(max_players=len(self.players))
+            if hasattr(self.pose_system, "reset"):
+                self.pose_system.reset()
 
     def _create_players(self) -> list[Player]:
         return [
@@ -115,6 +130,11 @@ class FlyingDemoGame:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    self.running = False
+                elif event.key == pygame.K_r and self.game_state == GameState.GAME_OVER:
+                    self._initialize_round()
 
         self._pressed = pygame.key.get_pressed()
         if self._pressed[pygame.K_ESCAPE]:
@@ -123,6 +143,11 @@ class FlyingDemoGame:
     def _update(self, dt: float) -> None:
         if self._pressed is None:
             return
+
+        if self.game_state != GameState.RUNNING:
+            return
+
+        self._round_time += dt
 
         if self.pose_system:
             self.pose_system.tick()
@@ -172,13 +197,40 @@ class FlyingDemoGame:
             caster = self.player_spellcasters[idx]
             caster.update(dt)
             pressed_cast = bool(pressed_for_player[player.controls.cast])
-            if self._pending_voice_spell and caster.definition.name.lower() == self._pending_voice_spell.lower():
+            voice_trigger = (
+                self._pending_voice_spell is not None
+                and caster.definition.name.lower() == self._pending_voice_spell.lower()
+            )
+            if voice_trigger:
                 pressed_cast = True
-                # consume after applying to allow one cast per detection
-                self._pending_voice_spell = None
-            caster.handle_input(pressed_cast, player, self.spell_manager)
+
+            cast = caster.handle_input(pressed_cast, player, self.spell_manager)
+
+            if voice_trigger:
+                if cast:
+                    print(f"[voice] cast spell: {caster.definition.name}")
+                    self._pending_voice_spell = None
+                    self._voice_blocked = False
+                    self._voice_last_reason = ""
+                else:
+                    caster.reset_input_state()
+                    reason_message = ""
+                    if caster.cooldown_timer > 0:
+                        reason_message = (
+                            f"[voice] waiting for {caster.definition.name} (cooldown {caster.cooldown_timer:.2f}s)"
+                        )
+                    elif not player.can_spend_mana(caster.definition.stats.cost):
+                        reason_message = (
+                            f"[voice] waiting for {caster.definition.name} (mana {player.mana:.1f}/{caster.definition.stats.cost:.1f})"
+                        )
+                    if reason_message and reason_message != self._voice_last_reason:
+                        print(reason_message)
+                        self._voice_last_reason = reason_message
+                    if not reason_message:
+                        self._voice_last_reason = ""
 
         self.spell_manager.update(dt, self.players)
+        self._evaluate_round_outcome()
 
     def _render(self) -> None:
         self.screen.fill(BACKGROUND)
@@ -186,6 +238,8 @@ class FlyingDemoGame:
         self.player_sprites.draw(self.screen)
         self.spell_manager.draw(self.screen)
         draw_health(self.screen, self.players, self.font)
+        if self.game_state == GameState.GAME_OVER:
+            self._render_game_over()
         pygame.display.flip()
 
     def _shutdown(self) -> None:
@@ -194,6 +248,60 @@ class FlyingDemoGame:
         if self.AudioListener and self.AudioListener.running:
             self.AudioListener.stop()
         pygame.quit()
+
+    def _initialize_round(self) -> None:
+        self.players = self._create_players()
+        self.player_sprites = pygame.sprite.Group(*self.players)
+        self.spell_manager = SpellManager(self.world_bounds)
+        self.player_spellcasters = self._build_spellcasters()
+        self._pending_voice_spell = None
+        self._voice_blocked = False
+        self._voice_last_partial = ""
+        self._voice_prev_stage = ""
+        self._voice_last_reason = ""
+        self._winner_name = None
+        self._round_time = 0.0
+        self.game_state = GameState.RUNNING
+        if self.pose_system and hasattr(self.pose_system, "reset"):
+            self.pose_system.reset()
+
+    def _evaluate_round_outcome(self) -> None:
+        if self.game_state != GameState.RUNNING:
+            return
+        living_players = [player for player in self.players if getattr(player, "is_alive", True)]
+        if len(living_players) > 1:
+            return
+        self.game_state = GameState.GAME_OVER
+        self._winner_name = living_players[0].name if living_players else None
+        self._pending_voice_spell = None
+        self._voice_blocked = False
+        self._voice_last_partial = ""
+        self._voice_prev_stage = ""
+        self._voice_last_reason = ""
+        for caster in self.player_spellcasters:
+            caster.reset_input_state()
+        self.spell_manager.clear()
+        outcome = self._winner_name or "No one"
+        print(f"[game] round over: {outcome} wins")
+
+    def _render_game_over(self) -> None:
+        overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 150))
+        self.screen.blit(overlay, (0, 0))
+
+        lines = ["Game Over"]
+        if self._winner_name:
+            lines.append(f"{self._winner_name} wins!")
+        else:
+            lines.append("It's a draw!")
+        lines.append("Press R to restart")
+
+        center_x = self.screen.get_width() // 2
+        center_y = self.screen.get_height() // 2
+        for idx, text in enumerate(lines):
+            label = self.font.render(text, True, (240, 240, 255))
+            rect = label.get_rect(center=(center_x, center_y + idx * 28))
+            self.screen.blit(label, rect)
 
 
 def run(*, use_pose_input: bool = True) -> None:

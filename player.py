@@ -66,6 +66,7 @@ class Player(pygame.sprite.Sprite):
         self._speed_multiplier = 1.0
         self._status_effects: list[StatusEffect] = []
         self.knockback_drag = 4.5
+        self.alive = True
 
         self.max_health = max(0.0, max_health)
         self.health = self.max_health
@@ -151,6 +152,10 @@ class Player(pygame.sprite.Sprite):
         if dt < 0:
             dt = 0.0
 
+        if not self.alive:
+            self._apply_visual_state(0.0)
+            return
+
         self._update_status_effects(dt)
         self._regen_mana(dt)
 
@@ -208,7 +213,12 @@ class Player(pygame.sprite.Sprite):
         self.rect = rect
 
     def apply_damage(self, amount: float) -> None:
-        self.health = max(0.0, self.health - max(0.0, amount))
+        if amount <= 0 or not self.alive:
+            return
+        self.health = max(0.0, self.health - amount)
+        if self.health <= 0 and self.alive:
+            self.health = 0.0
+            self.kill()
 
     def apply_knockback(self, impulse: pygame.Vector2) -> None:
         vector = pygame.Vector2(impulse)
@@ -220,6 +230,8 @@ class Player(pygame.sprite.Sprite):
         self._speed_multiplier = min(self._speed_multiplier, max(0.0, multiplier))
 
     def add_status(self, effect: StatusEffect) -> None:
+        if not self.alive:
+            return
         self._status_effects.append(effect)
 
     def mana_ratio(self) -> float:
@@ -233,7 +245,7 @@ class Player(pygame.sprite.Sprite):
         return self.mana >= amount
 
     def spend_mana(self, amount: float) -> bool:
-        if not self.can_spend_mana(amount):
+        if not self.can_spend_mana(amount) or not self.alive:
             return False
         self.mana = max(0.0, self.mana - max(0.0, amount))
         return True
@@ -252,7 +264,7 @@ class Player(pygame.sprite.Sprite):
         return pygame.Vector2(self._position.x, self._position.y + self._bob_offset) + offset
 
     def _regen_mana(self, dt: float) -> None:
-        if self.max_mana <= 0 or self.mana >= self.max_mana or dt <= 0:
+        if self.max_mana <= 0 or self.mana >= self.max_mana or dt <= 0 or not self.alive:
             return
         self.mana = min(self.max_mana, self.mana + self.mana_regen * dt)
 
@@ -289,3 +301,19 @@ class Player(pygame.sprite.Sprite):
     def velocity(self) -> pygame.Vector2:
         """Read-only access to the current velocity."""
         return self._current_velocity.copy()
+
+    def kill(self) -> None:
+        if not self.alive:
+            return
+        self.alive = False
+        self._velocity = pygame.Vector2()
+        self._knockback_velocity = pygame.Vector2()
+        self._current_velocity = pygame.Vector2()
+        self._status_effects.clear()
+        self._float_phase = 0.0
+        self._tilt_angle = 0.0
+        self._apply_visual_state(0.0)
+
+    @property
+    def is_alive(self) -> bool:
+        return self.alive

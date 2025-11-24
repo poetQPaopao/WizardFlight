@@ -53,6 +53,8 @@ class CollisionBehavior(SpellBehavior):
         for player in context.players:
             if not self.friendly_fire and player is spell.caster:
                 continue
+            if hasattr(player, "is_alive") and not player.is_alive:
+                continue
             if _circle_rect_collision(pygame.Vector2(spell.rect.center), spell.radius, player.rect):
                 spell.apply_hit(player)
                 if not spell.alive:

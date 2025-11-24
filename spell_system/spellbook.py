@@ -81,8 +81,8 @@ def voice_command_map() -> Dict[str, str]:
 def match_voice_command(transcript: str) -> str | None:
     """Return the spell name that matches ``transcript``, if any."""
 
-    # if not transcript:
-    #     return None
+    if not transcript:
+        return None
     lowered = transcript.lower()
     for keyword, spell_name in _VOICE_COMMAND_MAP.items():
         if keyword in lowered:

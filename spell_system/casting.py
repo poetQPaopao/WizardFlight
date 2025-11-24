@@ -21,22 +21,34 @@ class SpellCaster:
             return
         self.cooldown_timer = max(0.0, self.cooldown_timer - dt)
 
-    def handle_input(self, pressed: bool, player: Player, manager: "SpellManager") -> None:
+    def handle_input(self, pressed: bool, player: Player, manager: "SpellManager") -> bool:
+        if hasattr(player, "is_alive") and not player.is_alive:
+            self._was_pressed = pressed
+            return False
+        cast = False
         if pressed and not self._was_pressed:
-            self._attempt_cast(player, manager)
+            cast = self._attempt_cast(player, manager)
         self._was_pressed = pressed
+        return cast
 
-    def _attempt_cast(self, player: Player, manager: "SpellManager") -> None:
+    def reset_input_state(self) -> None:
+        self._was_pressed = False
+
+    def _attempt_cast(self, player: Player, manager: "SpellManager") -> bool:
+        if hasattr(player, "is_alive") and not player.is_alive:
+            return False
         if self.cooldown_timer > 0:
-            return
+            return False
         if not player.can_spend_mana(self.definition.stats.cost):
-            return
+            return False
         position = player.spell_origin()
         direction = player.aim_direction()
         spell = self.definition.create_spell(player, position, direction)
-        player.spend_mana(self.definition.stats.cost)
+        if not player.spend_mana(self.definition.stats.cost):
+            return False
         manager.spawn(spell)
         self.cooldown_timer = self.definition.stats.cooldown
+        return True
 
 
 class SpellManager:
@@ -58,3 +70,6 @@ class SpellManager:
     def draw(self, surface: pygame.Surface) -> None:
         for spell in self._spells:
             spell.draw(surface)
+
+    def clear(self) -> None:
+        self._spells.clear()
