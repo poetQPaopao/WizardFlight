@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, List, Tuple
 
 from .base_spell import BaseSpell
 from .behaviors import BoundsBehavior, CollisionBehavior, LinearMovementBehavior, LifetimeBehavior
@@ -78,13 +78,36 @@ def voice_command_map() -> Dict[str, str]:
     return dict(_VOICE_COMMAND_MAP)
 
 
-def match_voice_command(transcript: str) -> str | None:
-    """Return the spell name that matches ``transcript``, if any."""
+def match_voice_commands(transcript: str) -> list[str]:
+    """Return all spell names mentioned in ``transcript`` in spoken order."""
 
     if not transcript:
-        return None
+        return []
     lowered = transcript.lower()
+    matches: List[Tuple[int, str, str]] = []
     for keyword, spell_name in _VOICE_COMMAND_MAP.items():
-        if keyword in lowered:
-            return spell_name
-    return None
+        index = lowered.find(keyword)
+        if index == -1:
+            continue
+        matches.append((index, keyword, spell_name))
+
+    if not matches:
+        return []
+
+    matches.sort(key=lambda item: (item[0], -len(item[1])))
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for _, _, spell_name in matches:
+        if spell_name in seen:
+            continue
+        result.append(spell_name)
+        seen.add(spell_name)
+    return result
+
+
+def match_voice_command(transcript: str) -> str | None:
+    """Backward-compatible helper returning only the first matched spell."""
+
+    matches = match_voice_commands(transcript)
+    return matches[0] if matches else None

@@ -73,3 +73,6 @@ class SpellManager:
 
     def clear(self) -> None:
         self._spells.clear()
+
+    def clear(self) -> None:
+        self._spells.clear()
