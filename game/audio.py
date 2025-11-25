@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import Optional, Type
+from dataclasses import dataclass
+from typing import List, Optional, Sequence, Type
 
 import assemblyai as aai
 from assemblyai.streaming.v3 import (
@@ -23,6 +24,30 @@ from assemblyai.streaming.v3 import (
 	TurnEvent,
 )
 
+try:
+	import sounddevice as _sd
+except ImportError:
+	_sd = None
+
+
+@dataclass(frozen=True)
+class TranscriptEvent:
+	"""Represents a transcript update emitted from a specific audio source."""
+
+	source: str
+	text: str
+	stage: str
+	sequence: int
+
+
+@dataclass(frozen=True)
+class AudioInputConfig:
+	"""Configuration for wiring a physical microphone to a listener."""
+
+	source: str
+	device_index: Optional[int] = None
+	sample_rate: int = 48000
+
 
 def _get_api_key() -> Optional[str]:
 	"""Return the AssemblyAI API key, preferring the environment variable."""
@@ -32,8 +57,10 @@ def _get_api_key() -> Optional[str]:
 class AudioListener:
 	"""Streaming microphone listener that keeps the latest transcript."""
 
-	def __init__(self, sample_rate: int = 16000) -> None:
+	def __init__(self, sample_rate: int = 48000, *, device_index: Optional[int] = None, source_name: Optional[str] = None) -> None:
 		self.sample_rate = sample_rate
+		self.device_index = device_index
+		self.source_name = source_name or (f"mic-{device_index}" if device_index is not None else "mic-default")
 		self.api_key = _get_api_key()
 		if not self.api_key:
 			raise RuntimeError("ASSEMBLYAI_API_KEY is not set")
@@ -42,6 +69,8 @@ class AudioListener:
 		self.command_stage: str = ""
 		self._command_seq: int = 0
 		self._command_consumed: int = 0
+		self._latest_stage: str = ""
+		self._latest_sequence: int = 0
 
 		self._client: Optional[StreamingClient] = None
 		self._thread: Optional[threading.Thread] = None
@@ -79,9 +108,11 @@ class AudioListener:
 			with self._lock:
 				self.command = text
 				self.command_stage = stage
+				self._latest_stage = stage
 				if event.end_of_turn:
 					self._command_seq += 1
 					incremented = True
+				self._latest_sequence = self._command_seq
 			if event.end_of_turn and not event.turn_is_formatted:
 				params = StreamingSessionParameters(format_turns=True)
 				self_client.set_params(params)
@@ -111,10 +142,15 @@ class AudioListener:
 
 		def _stream_thread():
 			try:
-				mic = aai.extras.MicrophoneStream(sample_rate=self.sample_rate)
+				mic_kwargs = {"sample_rate": self.sample_rate}
+				if self.device_index is not None:
+					mic_kwargs["device_index"] = self.device_index
+				print(f"[voice:{self.source_name}] opening microphone with args {mic_kwargs}")
+				mic = aai.extras.MicrophoneStream(**mic_kwargs)
 				client.stream(mic)
 			except Exception as exc:
 				self._error = str(exc)
+				print(f"[voice:{self.source_name}] stream error: {exc}")
 			finally:
 				try:
 					client.disconnect(terminate=True)
@@ -160,17 +196,52 @@ class AudioListener:
 		self.stop()
 		return result
 
-	def consume_final(self) -> str:
-		"""Return the newest final transcript once, or "" if nothing fresh."""
+	def consume_final_event(self) -> Optional[TranscriptEvent]:
+		"""Return the newest final transcript, tagged with its audio source."""
 
 		with self._lock:
 			if self.command_stage != "final" or not self.command:
-				return ""
+				return None
 			if self._command_consumed == self._command_seq:
-				return ""
+				return None
 			text = self.command
-			self._command_consumed = self._command_seq
-		return text
+			sequence = self._command_seq
+			self._command_consumed = sequence
+		return TranscriptEvent(
+			source=self.source_name,
+			text=text,
+			stage="final",
+			sequence=sequence,
+		)
+
+	def consume_final(self) -> str:
+		"""Backward-compatible helper that returns only the transcript text."""
+
+		event = self.consume_final_event()
+		return event.text if event else ""
+
+	def snapshot(self) -> TranscriptEvent:
+		"""Return the latest transcript state (partial or final) for this source."""
+
+		with self._lock:
+			return TranscriptEvent(
+				source=self.source_name,
+				text=self.command,
+				stage=self.command_stage,
+				sequence=self._latest_sequence,
+			)
+
+	@property
+	def source(self) -> str:
+		"""Human-readable name for the audio source."""
+
+		return self.source_name
+
+	@property
+	def input_device_index(self) -> Optional[int]:
+		"""Return the PyAudio device index, if one was specified."""
+
+		return self.device_index
 
 	@property
 	def error(self) -> Optional[str]:
@@ -185,5 +256,105 @@ class AudioListener:
 		return self._running
 
 
-__all__ = ["AudioListener"]
+class MultiMicAudioController:
+	"""Manage multiple ``AudioListener`` instances, one per microphone input."""
+
+	def __init__(self, configs: Sequence[AudioInputConfig], *, auto_start: bool = True) -> None:
+		if not configs:
+			raise ValueError("At least one AudioInputConfig is required")
+		self.listeners: List[AudioListener] = [
+			AudioListener(
+				sample_rate=config.sample_rate,
+				device_index=config.device_index,
+				source_name=config.source,
+			)
+			for config in configs
+		]
+		if auto_start:
+			self.start()
+
+	def start(self) -> None:
+		"""Start all underlying listeners."""
+
+		for listener in self.listeners:
+			listener.start()
+
+	def stop(self) -> None:
+		"""Stop all underlying listeners."""
+
+		for listener in self.listeners:
+			listener.stop()
+
+	def consume_final_events(self) -> List[TranscriptEvent]:
+		"""Collect final transcripts from every listener since the last poll."""
+
+		events: List[TranscriptEvent] = []
+		for listener in self.listeners:
+			event = listener.consume_final_event()
+			if event:
+				events.append(event)
+		return events
+
+	def snapshots(self) -> List[TranscriptEvent]:
+		"""Return the latest transcript state for each listener."""
+
+		return [listener.snapshot() for listener in self.listeners]
+
+	def errors(self) -> List[tuple[str, str]]:
+		"""Return a list of ``(source, error)`` pairs for active errors."""
+
+		problems: List[tuple[str, str]] = []
+		for listener in self.listeners:
+			if listener.error:
+				problems.append((listener.source, listener.error))
+		return problems
+
+	@property
+	def running(self) -> bool:
+		"""Return ``True`` only if every listener is active."""
+
+		return all(listener.running for listener in self.listeners)
+
+	@staticmethod
+	def list_input_devices() -> List[tuple[int, str]]:
+		"""Return ``(index, name)`` pairs for available audio input devices."""
+
+		devices: List[tuple[int, str]] = []
+		if _sd is not None:
+			try:
+				for idx, info in enumerate(_sd.query_devices()):
+					if info.get("max_input_channels", 0) > 0:
+						name = info.get("name", f"Device {idx}")
+						host = info.get("hostapi")
+						if host is not None and 0 <= host < len(_sd.query_hostapis()):
+							host_name = _sd.query_hostapis()[host].get("name", "")
+							if host_name:
+								name = f"{name} ({host_name})"
+						devices.append((idx, name))
+			except Exception:
+				devices = []
+		if devices:
+			return devices
+
+		try:
+			pa = aai.extras.pyaudio.PyAudio()
+		except Exception:
+			return []
+		try:
+			device_count = pa.get_device_count()
+			for idx in range(device_count):
+				info = pa.get_device_info_by_index(idx)
+				if info.get("maxInputChannels", 0) > 0:
+					devices.append((idx, info.get("name", f"Device {idx}")))
+		finally:
+			pa.terminate()
+		return devices
+
+
+__all__ = [
+	"AudioListener",
+	"AudioInputConfig",
+	"TranscriptEvent",
+	"MultiMicAudioController",
+]
 

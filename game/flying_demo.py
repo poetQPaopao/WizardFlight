@@ -9,7 +9,7 @@ import pygame
 from controls import ControlScheme, PoseControlSystem, PoseKeyState
 from player import Player
 from spell_system import SpellCaster, SpellManager, default_spellbook, match_voice_commands
-from audio import AudioListener
+from audio import AudioInputConfig, MultiMicAudioController
 
 SCREEN_SIZE = (1280, 720)
 BACKGROUND = (18, 18, 28)
@@ -56,7 +56,13 @@ class GameState(Enum):
 @dataclass
 class VoiceSpellRequest:
     spell_name: str
+    player_index: int
     last_reason: str = ""
+
+
+
+class MicrophoneConfigurationCancelled(Exception):
+    """Raised when the user aborts microphone selection (e.g., via Ctrl+C)."""
 
 
 class FlyingDemoGame:
@@ -76,15 +82,17 @@ class FlyingDemoGame:
         self.pose_system = None
         self.running = True
         self._pressed: Optional[Sequence[bool]] = None
-        self.AudioListener = AudioListener()
-        self.AudioListener.start()
+        self.audio_controller: Optional[MultiMicAudioController] = None
+        self._player_sources: dict[int, str] = {}
+        self._source_to_player: dict[str, int] = {}
         self.game_state = GameState.RUNNING
         self._winner_name: Optional[str] = None
         self._round_time = 0.0
         self._pending_voice_spells: list[VoiceSpellRequest] = []
-        self._voice_blocked = False
-        self._voice_last_partial = ""
-        self._voice_prev_stage = ""
+        self._voice_blocked: dict[int, bool] = {}
+        self._voice_last_partial: dict[int, str] = {}
+        self._voice_prev_stage: dict[int, str] = {}
+        self._voice_last_errors: dict[str, str] = {}
         self._initialize_round()
         if use_pose_input:
             self.pose_system = PoseControlSystem(max_players=len(self.players))
@@ -160,32 +168,49 @@ class FlyingDemoGame:
             if self.pose_system.quit_requested:
                 self.running = False
                 return
-        if self.AudioListener:
-            final_text = self.AudioListener.consume_final()
-            if final_text:
-                print(f"[voice] transcript: {final_text}")
-                if not self._voice_blocked:
-                    spell_names = match_voice_commands(final_text)
+        if self.audio_controller:
+            controller_errors = self.audio_controller.errors()
+            seen_sources = set()
+            for source, message in controller_errors:
+                seen_sources.add(source)
+                last = self._voice_last_errors.get(source)
+                if message != last:
+                    print(f"[voice:{source}] error: {message}")
+                    self._voice_last_errors[source] = message
+            for source in list(self._voice_last_errors):
+                if source not in seen_sources:
+                    del self._voice_last_errors[source]
+            for event in self.audio_controller.consume_final_events():
+                player_idx = self._source_to_player.get(event.source)
+                if player_idx is None:
+                    continue
+                print(f"[voice:{event.source}] transcript: {event.text}")
+                if not self._voice_blocked.get(player_idx, False):
+                    spell_names = match_voice_commands(event.text)
                     if spell_names:
-                        self._enqueue_voice_spells(spell_names)
+                        self._enqueue_voice_spells(spell_names, player_idx, event.source)
 
-            partial_text = self.AudioListener.command
-            stage = self.AudioListener.command_stage or ""
-            if stage != "final" and self._voice_prev_stage == "final":
-                self._voice_blocked = False
-                self._voice_last_partial = ""
-            if stage != "final" and partial_text:
-                if partial_text != self._voice_last_partial:
-                    print(f"[voice] partial: {partial_text}")
-                    self._voice_last_partial = partial_text
-                    if not self._voice_blocked:
-                        spell_names = match_voice_commands(partial_text)
-                        if spell_names:
-                            self._enqueue_voice_spells(spell_names)
-            elif not partial_text and stage != "final":
-                self._voice_last_partial = ""
-                self._voice_blocked = False
-            self._voice_prev_stage = stage
+            for snapshot in self.audio_controller.snapshots():
+                player_idx = self._source_to_player.get(snapshot.source)
+                if player_idx is None:
+                    continue
+                stage = snapshot.stage or ""
+                if stage != "final" and self._voice_prev_stage.get(player_idx) == "final":
+                    self._voice_blocked[player_idx] = False
+                    self._voice_last_partial[player_idx] = ""
+                partial_text = snapshot.text
+                if stage != "final" and partial_text:
+                    if partial_text != self._voice_last_partial.get(player_idx, ""):
+                        print(f"[voice:{snapshot.source}] partial: {partial_text}")
+                        self._voice_last_partial[player_idx] = partial_text
+                        if not self._voice_blocked.get(player_idx, False):
+                            spell_names = match_voice_commands(partial_text)
+                            if spell_names:
+                                self._enqueue_voice_spells(spell_names, player_idx, snapshot.source)
+                elif not partial_text and stage != "final":
+                    self._voice_last_partial[player_idx] = ""
+                    self._voice_blocked[player_idx] = False
+                self._voice_prev_stage[player_idx] = stage
 
 
         for idx, player in enumerate(self.players):
@@ -199,7 +224,7 @@ class FlyingDemoGame:
             caster = self.player_spellcasters[idx]
             caster.update(dt)
             pressed_cast = bool(pressed_for_player[player.controls.cast])
-            request = self._find_voice_request(caster.definition.name)
+            request = self._find_voice_request(caster.definition.name, idx)
             voice_trigger = request is not None
             if voice_trigger:
                 pressed_cast = True
@@ -243,19 +268,21 @@ class FlyingDemoGame:
     def _shutdown(self) -> None:
         if self.pose_system:
             self.pose_system.shutdown()
-        if self.AudioListener and self.AudioListener.running:
-            self.AudioListener.stop()
+        if self.audio_controller:
+            self.audio_controller.stop()
         pygame.quit()
 
     def _initialize_round(self) -> None:
+        first_setup = self.audio_controller is None
         self.players = self._create_players()
         self.player_sprites = pygame.sprite.Group(*self.players)
         self.spell_manager = SpellManager(self.world_bounds)
         self.player_spellcasters = self._build_spellcasters()
-        self._pending_voice_spells.clear()
-        self._voice_blocked = False
-        self._voice_last_partial = ""
-        self._voice_prev_stage = ""
+        if first_setup:
+            self._setup_audio_inputs()
+            if not self.running:
+                return
+        self._reset_voice_state()
         self._winner_name = None
         self._round_time = 0.0
         self.game_state = GameState.RUNNING
@@ -270,10 +297,7 @@ class FlyingDemoGame:
             return
         self.game_state = GameState.GAME_OVER
         self._winner_name = living_players[0].name if living_players else None
-        self._pending_voice_spells.clear()
-        self._voice_blocked = False
-        self._voice_last_partial = ""
-        self._voice_prev_stage = ""
+        self._reset_voice_state()
         for caster in self.player_spellcasters:
             caster.reset_input_state()
         self.spell_manager.clear()
@@ -299,25 +323,86 @@ class FlyingDemoGame:
             rect = label.get_rect(center=(center_x, center_y + idx * 28))
             self.screen.blit(label, rect)
 
-    def _enqueue_voice_spells(self, spell_names: Sequence[str]) -> None:
+    def _setup_audio_inputs(self) -> None:
+        print("\nConfigure microphones for each player (press Enter to use the system default).")
+        configs: list[AudioInputConfig] = []
+        self._player_sources.clear()
+        self._source_to_player.clear()
+        try:
+            for idx, player in enumerate(self.players):
+                device_index = self._prompt_for_device_index(player.name)
+                source = player.name
+                self._player_sources[idx] = source
+                self._source_to_player[source] = idx
+                configs.append(AudioInputConfig(source=source, device_index=device_index))
+                if device_index is None:
+                    print(f"[voice] {player.name} microphone: default input")
+                else:
+                    print(f"[voice] {player.name} microphone: device index {device_index}")
+        except MicrophoneConfigurationCancelled:
+            print("\n[voice] Microphone configuration cancelled. Exiting game.")
+            self.running = False
+            return
+        self.audio_controller = MultiMicAudioController(configs)
+
+    def _reset_voice_state(self) -> None:
+        player_count = len(self.players)
+        self._pending_voice_spells.clear()
+        self._voice_blocked = {idx: False for idx in range(player_count)}
+        self._voice_last_partial = {idx: "" for idx in range(player_count)}
+        self._voice_prev_stage = {idx: "" for idx in range(player_count)}
+        self._voice_last_errors.clear()
+
+    @staticmethod
+    def _prompt_for_device_index(player_name: str) -> Optional[int]:
+        devices = MultiMicAudioController.list_input_devices()
+        if devices:
+            print("\nAvailable microphones:")
+            for idx, name in devices:
+                print(f"  [{idx}] {name}")
+        else:
+            print("\nNo audio input devices detected by PyAudio; using system defaults.")
+        while True:
+            try:
+                raw = input(f"Enter microphone device index for {player_name} (blank for default): ").strip()
+            except EOFError:
+                return None
+            except KeyboardInterrupt:
+                print()
+                raise MicrophoneConfigurationCancelled
+            if raw == "":
+                return None
+            try:
+                return int(raw)
+            except ValueError:
+                print("Please enter a valid integer device index or leave blank.")
+
+    def _enqueue_voice_spells(self, spell_names: Sequence[str], player_index: int, source: str) -> None:
         if not spell_names:
             return
-        available = {caster.definition.name.lower() for caster in self.player_spellcasters}
+        if player_index >= len(self.player_spellcasters):
+            print(f"[voice:{source}] no spellcaster configured for player index {player_index}")
+            return
         added = False
+        player_casters = [self.player_spellcasters[player_index]] if self.player_spellcasters else []
         for spell_name in spell_names:
-            if spell_name.lower() not in available:
-                print(f"[voice] no equipped spell matches '{spell_name}'")
-                continue
-            self._pending_voice_spells.append(VoiceSpellRequest(spell_name))
-            print(f"[voice] matched spell: {spell_name}")
-            added = True
+            matched = False
+            for caster in player_casters:
+                if caster.definition.name.lower() == spell_name.lower():
+                    self._pending_voice_spells.append(VoiceSpellRequest(spell_name, player_index))
+                    print(f"[voice:{source}] matched spell: {spell_name}")
+                    added = True
+                    matched = True
+                    break
+            if not matched:
+                print(f"[voice:{source}] no equipped spell matches '{spell_name}' for {self.players[player_index].name}")
         if added:
-            self._voice_blocked = True
+            self._voice_blocked[player_index] = True
 
-    def _find_voice_request(self, spell_name: str) -> Optional[VoiceSpellRequest]:
+    def _find_voice_request(self, spell_name: str, player_index: int) -> Optional[VoiceSpellRequest]:
         target = spell_name.lower()
         for request in self._pending_voice_spells:
-            if request.spell_name.lower() == target:
+            if request.player_index == player_index and request.spell_name.lower() == target:
                 return request
         return None
 
@@ -326,8 +411,8 @@ class FlyingDemoGame:
             self._pending_voice_spells.remove(request)
         except ValueError:
             return
-        if not self._pending_voice_spells:
-            self._voice_blocked = False
+        if not any(item.player_index == request.player_index for item in self._pending_voice_spells):
+            self._voice_blocked[request.player_index] = False
 
 
 def run(*, use_pose_input: bool = True) -> None:
