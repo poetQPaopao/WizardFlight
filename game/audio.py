@@ -11,6 +11,7 @@ import threading
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Type
 
+import numpy as np
 import assemblyai as aai
 from assemblyai.streaming.v3 import (
 	BeginEvent,
@@ -47,6 +48,64 @@ class AudioInputConfig:
 	source: str
 	device_index: Optional[int] = None
 	sample_rate: int = 48000
+	channel_mapping: Optional[List[int]] = None
+
+
+class ChannelSelectMicrophoneStream:
+	"""Custom microphone stream that supports channel selection via mapping."""
+
+	def __init__(self, sample_rate: int = 48000, device_index: Optional[int] = None, channel_mapping: Optional[List[int]] = None):
+		self.sample_rate = sample_rate
+		self.device_index = device_index
+		self.channel_mapping = channel_mapping
+
+	def __iter__(self):
+		if _sd is None:
+			raise RuntimeError("sounddevice is not installed")
+		
+		# Determine required number of channels to capture
+		# If we want channel 2, we must capture at least 2 channels.
+		# Also, if mapping is used, we prefer to open at least 2 channels (if possible)
+		# to prevent some drivers/devices from downmixing stereo to mono when channels=1 is requested.
+		req_channels = 1
+		if self.channel_mapping:
+			req_channels = max(max(self.channel_mapping), 2)
+		
+		kwargs = {
+			"samplerate": self.sample_rate,
+			"device": self.device_index,
+			"dtype": "int16",
+			"channels": req_channels,
+		}
+		
+		# AssemblyAI requires chunks > 50ms. 
+		# We'll use ~100ms chunks (e.g. 4800 samples at 48kHz).
+		chunk_size = int(self.sample_rate * 0.1)
+
+		with _sd.InputStream(**kwargs) as stream:
+			while True:
+				data, overflowed = stream.read(chunk_size)
+				# data is a numpy array of shape (frames, channels)
+				
+				if self.channel_mapping:
+					# Extract specific channels based on mapping (1-based indices)
+					# We want to select specific columns.
+					# e.g. mapping=[1] -> column 0
+					# e.g. mapping=[2] -> column 1
+					indices = [m - 1 for m in self.channel_mapping]
+					
+					# Ensure we don't go out of bounds (though req_channels should prevent this)
+					valid_indices = [i for i in indices if i < data.shape[1]]
+					
+					if valid_indices:
+						selected = data[:, valid_indices]
+						# AssemblyAI expects mono usually, or we just send the selected channels.
+						# If multiple channels selected, it sends them interleaved.
+						yield selected.tobytes()
+					else:
+						yield data.tobytes()
+				else:
+					yield data.tobytes()
 
 
 def _get_api_key() -> Optional[str]:
@@ -57,9 +116,10 @@ def _get_api_key() -> Optional[str]:
 class AudioListener:
 	"""Streaming microphone listener that keeps the latest transcript."""
 
-	def __init__(self, sample_rate: int = 48000, *, device_index: Optional[int] = None, source_name: Optional[str] = None) -> None:
+	def __init__(self, sample_rate: int = 48000, *, device_index: Optional[int] = None, source_name: Optional[str] = None, channel_mapping: Optional[List[int]] = None) -> None:
 		self.sample_rate = sample_rate
 		self.device_index = device_index
+		self.channel_mapping = channel_mapping
 		self.source_name = source_name or (f"mic-{device_index}" if device_index is not None else "mic-default")
 		self.api_key = _get_api_key()
 		if not self.api_key:
@@ -142,11 +202,12 @@ class AudioListener:
 
 		def _stream_thread():
 			try:
-				mic_kwargs = {"sample_rate": self.sample_rate}
-				if self.device_index is not None:
-					mic_kwargs["device_index"] = self.device_index
-				print(f"[voice:{self.source_name}] opening microphone with args {mic_kwargs}")
-				mic = aai.extras.MicrophoneStream(**mic_kwargs)
+				print(f"[voice:{self.source_name}] opening microphone with rate={self.sample_rate}, device={self.device_index}, mapping={self.channel_mapping}")
+				mic = ChannelSelectMicrophoneStream(
+					sample_rate=self.sample_rate,
+					device_index=self.device_index,
+					channel_mapping=self.channel_mapping
+				)
 				client.stream(mic)
 			except Exception as exc:
 				self._error = str(exc)
@@ -267,6 +328,7 @@ class MultiMicAudioController:
 				sample_rate=config.sample_rate,
 				device_index=config.device_index,
 				source_name=config.source,
+				channel_mapping=config.channel_mapping,
 			)
 			for config in configs
 		]

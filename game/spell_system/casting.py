@@ -9,45 +9,75 @@ from player import Player
 from .core import Spell, SpellDefinition
 
 class SpellCaster:
-    """Handles cooldowns and input for a single equipped spell."""
+    """Handles cooldowns and input for multiple equipped spells."""
 
-    def __init__(self, definition: SpellDefinition) -> None:
-        self.definition = definition
-        self.cooldown_timer = 0.0
+    def __init__(self, definitions: Sequence[SpellDefinition]) -> None:
+        self.definitions = list(definitions)
+        self.cooldowns: dict[str, float] = {d.name: 0.0 for d in definitions}
         self._was_pressed = False
+
+    @property
+    def definition(self) -> SpellDefinition:
+        """Return the primary spell definition (for backward compatibility)."""
+        return self.definitions[0] if self.definitions else None
+
+    @property
+    def cooldown_timer(self) -> float:
+        """Return primary spell cooldown (compatibility)."""
+        return self.cooldowns.get(self.definition.name, 0.0) if self.definition else 0.0
 
     def update(self, dt: float) -> None:
         if dt <= 0:
             return
-        self.cooldown_timer = max(0.0, self.cooldown_timer - dt)
+        for name in self.cooldowns:
+            self.cooldowns[name] = max(0.0, self.cooldowns[name] - dt)
 
-    def handle_input(self, pressed: bool, player: Player, manager: "SpellManager") -> bool:
+    def handle_input(self, pressed: bool, player: Player, manager: "SpellManager", spell_name: str | None = None) -> bool:
         if hasattr(player, "is_alive") and not player.is_alive:
             self._was_pressed = pressed
             return False
+        
         cast = False
-        if pressed and not self._was_pressed:
-            cast = self._attempt_cast(player, manager)
+        # If a specific spell is requested (e.g. via voice), we ignore the button 'pressed' edge detection
+        # because voice commands are discrete events, not held buttons.
+        if spell_name:
+            cast = self._attempt_cast(player, manager, spell_name)
+        
+        # Otherwise, check for button press (primary spell)
+        elif pressed and not self._was_pressed:
+            if self.definition:
+                cast = self._attempt_cast(player, manager, self.definition.name)
+        
         self._was_pressed = pressed
         return cast
 
     def reset_input_state(self) -> None:
         self._was_pressed = False
 
-    def _attempt_cast(self, player: Player, manager: "SpellManager") -> bool:
+    def _attempt_cast(self, player: Player, manager: "SpellManager", spell_name: str) -> bool:
+        definition = next((d for d in self.definitions if d.name == spell_name), None)
+        if not definition:
+            return False
+
         if hasattr(player, "is_alive") and not player.is_alive:
             return False
-        if self.cooldown_timer > 0:
+        
+        current_cooldown = self.cooldowns.get(spell_name, 0.0)
+        if current_cooldown > 0:
             return False
-        if not player.can_spend_mana(self.definition.stats.cost):
+            
+        if not player.can_spend_mana(definition.stats.cost):
             return False
+            
         position = player.spell_origin()
         direction = player.aim_direction()
-        spell = self.definition.create_spell(player, position, direction)
-        if not player.spend_mana(self.definition.stats.cost):
+        spell = definition.create_spell(player, position, direction)
+        
+        if not player.spend_mana(definition.stats.cost):
             return False
+            
         manager.spawn(spell)
-        self.cooldown_timer = self.definition.stats.cooldown
+        self.cooldowns[spell_name] = definition.stats.cooldown
         return True
 
 

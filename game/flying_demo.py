@@ -121,8 +121,8 @@ class FlyingDemoGame:
         spell_defs = default_spellbook()
         casters: list[SpellCaster] = []
         for idx in range(len(self.players)):
-            definition = spell_defs[idx % len(spell_defs)]
-            casters.append(SpellCaster(definition))
+            # Give everyone the full spellbook so they can cast any spell
+            casters.append(SpellCaster(spell_defs))
             
         return casters
 
@@ -224,33 +224,40 @@ class FlyingDemoGame:
             caster = self.player_spellcasters[idx]
             caster.update(dt)
             pressed_cast = bool(pressed_for_player[player.controls.cast])
-            request = self._find_voice_request(caster.definition.name, idx)
-            voice_trigger = request is not None
-            if voice_trigger:
-                pressed_cast = True
-
-            cast = caster.handle_input(pressed_cast, player, self.spell_manager)
-
-            if voice_trigger:
-                if cast:
-                    print(f"[voice] cast spell: {caster.definition.name}")
-                    self._remove_voice_request(request)
+            
+            # Check for any pending voice request for this player
+            voice_request = next((r for r in self._pending_voice_spells if r.player_index == idx), None)
+            
+            cast_via_voice = False
+            if voice_request:
+                # Try to cast the specific spell requested by voice
+                if caster.handle_input(False, player, self.spell_manager, spell_name=voice_request.spell_name):
+                    print(f"[voice] cast spell: {voice_request.spell_name}")
+                    self._remove_voice_request(voice_request)
+                    cast_via_voice = True
                 else:
-                    caster.reset_input_state()
-                    reason_message = ""
-                    if caster.cooldown_timer > 0:
-                        reason_message = (
-                            f"[voice] waiting for {caster.definition.name} (cooldown {caster.cooldown_timer:.2f}s)"
-                        )
-                    elif not player.can_spend_mana(caster.definition.stats.cost):
-                        reason_message = (
-                            f"[voice] waiting for {caster.definition.name} (mana {player.mana:.1f}/{caster.definition.stats.cost:.1f})"
-                        )
-                    if reason_message and reason_message != request.last_reason:
-                        print(reason_message)
-                        request.last_reason = reason_message
-                    if not reason_message:
-                        request.last_reason = ""
+                    # Provide feedback for failure (cooldown/mana)
+                    definition = next((d for d in caster.definitions if d.name == voice_request.spell_name), None)
+                    if definition:
+                        reason_message = ""
+                        cooldown = caster.cooldowns.get(definition.name, 0.0)
+                        if cooldown > 0:
+                            reason_message = (
+                                f"[voice] waiting for {definition.name} (cooldown {cooldown:.2f}s)"
+                            )
+                        elif not player.can_spend_mana(definition.stats.cost):
+                            reason_message = (
+                                f"[voice] waiting for {definition.name} (mana {player.mana:.1f}/{definition.stats.cost:.1f})"
+                            )
+                        if reason_message and reason_message != voice_request.last_reason:
+                            print(reason_message)
+                            voice_request.last_reason = reason_message
+                        if not reason_message:
+                            voice_request.last_reason = ""
+
+            # If not casting via voice, allow manual input (casts primary spell)
+            if not cast_via_voice:
+                caster.handle_input(pressed_cast, player, self.spell_manager)
 
         self.spell_manager.update(dt, self.players)
         self._evaluate_round_outcome()
@@ -324,21 +331,65 @@ class FlyingDemoGame:
             self.screen.blit(label, rect)
 
     def _setup_audio_inputs(self) -> None:
-        print("\nConfigure microphones for each player (press Enter to use the system default).")
+        print("\nAudio Configuration Mode:")
+        print("1. Dual Device (Two separate microphones)")
+        print("2. Single Device (Stereo Split - Left=P1, Right=P2)")
+        
+        mode = "1"
+        while True:
+            try:
+                mode = input("Select mode (1/2) [default: 1]: ").strip() or "1"
+                if mode in ("1", "2"):
+                    break
+                print("Invalid selection.")
+            except KeyboardInterrupt:
+                raise MicrophoneConfigurationCancelled
+
         configs: list[AudioInputConfig] = []
         self._player_sources.clear()
         self._source_to_player.clear()
+
         try:
-            for idx, player in enumerate(self.players):
-                device_index = self._prompt_for_device_index(player.name)
-                source = player.name
-                self._player_sources[idx] = source
-                self._source_to_player[source] = idx
-                configs.append(AudioInputConfig(source=source, device_index=device_index))
-                if device_index is None:
-                    print(f"[voice] {player.name} microphone: default input")
-                else:
-                    print(f"[voice] {player.name} microphone: device index {device_index}")
+            if mode == "2":
+                # Stereo Split Mode
+                print("\n[Stereo Split Mode] Select the single device for both players.")
+                device_index = self._prompt_for_device_index("Stereo Input")
+                
+                # Player 1 -> Left Channel (1)
+                p1_source = self.players[0].name
+                self._player_sources[0] = p1_source
+                self._source_to_player[p1_source] = 0
+                configs.append(AudioInputConfig(
+                    source=p1_source, 
+                    device_index=device_index, 
+                    channel_mapping=[1]
+                ))
+                print(f"[voice] {p1_source} mapped to Left Channel of device {device_index}")
+
+                # Player 2 -> Right Channel (2)
+                p2_source = self.players[1].name
+                self._player_sources[1] = p2_source
+                self._source_to_player[p2_source] = 1
+                configs.append(AudioInputConfig(
+                    source=p2_source, 
+                    device_index=device_index, 
+                    channel_mapping=[2]
+                ))
+                print(f"[voice] {p2_source} mapped to Right Channel of device {device_index}")
+
+            else:
+                # Dual Device Mode (Original)
+                for idx, player in enumerate(self.players):
+                    device_index = self._prompt_for_device_index(player.name)
+                    source = player.name
+                    self._player_sources[idx] = source
+                    self._source_to_player[source] = idx
+                    configs.append(AudioInputConfig(source=source, device_index=device_index))
+                    if device_index is None:
+                        print(f"[voice] {player.name} microphone: default input")
+                    else:
+                        print(f"[voice] {player.name} microphone: device index {device_index}")
+
         except MicrophoneConfigurationCancelled:
             print("\n[voice] Microphone configuration cancelled. Exiting game.")
             self.running = False
@@ -384,11 +435,13 @@ class FlyingDemoGame:
             print(f"[voice:{source}] no spellcaster configured for player index {player_index}")
             return
         added = False
-        player_casters = [self.player_spellcasters[player_index]] if self.player_spellcasters else []
+        caster = self.player_spellcasters[player_index]
+        
         for spell_name in spell_names:
             matched = False
-            for caster in player_casters:
-                if caster.definition.name.lower() == spell_name.lower():
+            # Check if the caster has a definition for this spell
+            for definition in caster.definitions:
+                if definition.name.lower() == spell_name.lower():
                     self._pending_voice_spells.append(VoiceSpellRequest(spell_name, player_index))
                     print(f"[voice:{source}] matched spell: {spell_name}")
                     added = True
@@ -398,13 +451,6 @@ class FlyingDemoGame:
                 print(f"[voice:{source}] no equipped spell matches '{spell_name}' for {self.players[player_index].name}")
         if added:
             self._voice_blocked[player_index] = True
-
-    def _find_voice_request(self, spell_name: str, player_index: int) -> Optional[VoiceSpellRequest]:
-        target = spell_name.lower()
-        for request in self._pending_voice_spells:
-            if request.player_index == player_index and request.spell_name.lower() == target:
-                return request
-        return None
 
     def _remove_voice_request(self, request: VoiceSpellRequest) -> None:
         try:

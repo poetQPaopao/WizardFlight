@@ -1,13 +1,12 @@
 import pyaudio
-import wave
 import numpy as np
 import threading
+import time
 
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 48000
-RECORD_SECONDS = 10
 
 p = pyaudio.PyAudio()
 
@@ -17,69 +16,142 @@ p = pyaudio.PyAudio()
 print("Available input devices:\n")
 input_devices = []
 for i in range(p.get_device_count()):
-    info = p.get_device_info_by_index(i)
-    if info["maxInputChannels"] > 0:
-        print(f"Index {i} — {info['name']}  (Channels: {info['maxInputChannels']})")
-        input_devices.append(i)
+    try:
+        info = p.get_device_info_by_index(i)
+        if info["maxInputChannels"] > 0:
+            print(f"Index {i} — {info['name']}  (Channels: {info['maxInputChannels']})")
+            input_devices.append(i)
+    except Exception:
+        continue
 
 # -------------------------------
-# 选择两个设备
+# 选择模式
 # -------------------------------
-devA = int(input("\n请输入 Mic A 的设备 index: "))
-devB = int(input("请输入 Mic B 的设备 index: "))
+print("\nSelect Mode:")
+print("1. Two separate devices (Dual Mono)")
+print("2. Single device (Stereo Split - Left/Right)")
+mode = input("Choice (1/2): ").strip()
 
-print(f"\n[INFO] Mic A 设备: {p.get_device_info_by_index(devA)['name']}")
-print(f"[INFO] Mic B 设备: {p.get_device_info_by_index(devB)['name']}\n")
+running = True
+threads = []
 
-# -------------------------------
-# 录音线程
-# -------------------------------
-def record_from_device(device_index, output_file):
-    print(f"[START] Recording from device: {device_index}")
+if mode == "2":
+    # -------------------------------
+    # 单设备立体声分轨模式
+    # -------------------------------
+    try:
+        dev = int(input("\nEnter Stereo Device index: "))
+    except ValueError:
+        print("Invalid input.")
+        exit(1)
 
-    stream = p.open(
-        format=FORMAT,
-        channels=CHANNELS,
-        rate=RATE,
-        input=True,
-        frames_per_buffer=CHUNK,
-        input_device_index=device_index
-    )
+    print(f"\n[INFO] Stereo Device: {p.get_device_info_by_index(dev)['name']}\n")
 
-    frames = []
+    def monitor_stereo(device_index):
+        print(f"[START] Monitoring Stereo Device: {device_index}")
+        try:
+            stream = p.open(
+                format=FORMAT,
+                channels=2,
+                rate=RATE,
+                input=True,
+                frames_per_buffer=CHUNK,
+                input_device_index=device_index
+            )
+        except Exception as e:
+            print(f"[ERROR] Could not open stream: {e}")
+            return
 
-    for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-        data = stream.read(CHUNK, exception_on_overflow=False)
-        frames.append(data)
+        while running:
+            try:
+                data = stream.read(CHUNK, exception_on_overflow=False)
+                audio_np = np.frombuffer(data, dtype=np.int16)
+                
+                # Reshape to (samples, channels)
+                stereo_data = audio_np.reshape(-1, 2)
+                left_data = stereo_data[:, 0]
+                right_data = stereo_data[:, 1]
+                
+                rms_l = np.sqrt(np.mean(left_data.astype(np.float64)**2)) if left_data.size else 0.0
+                rms_r = np.sqrt(np.mean(right_data.astype(np.float64)**2)) if right_data.size else 0.0
 
-        audio_np = np.frombuffer(data, dtype=np.int16)
-        rms = np.sqrt(np.mean(audio_np**2))
-        print(f"[Device {device_index}] RMS={rms:.2f}")
+                if not np.isfinite(rms_l):
+                    rms_l = 0.0
+                if not np.isfinite(rms_r):
+                    rms_r = 0.0
 
-    stream.stop_stream()
-    stream.close()
+                vol_l = int(rms_l / 100)
+                vol_r = int(rms_r / 100)
+                # Print side by side
+                print(f"[L] {rms_l:6.2f} {'|'*vol_l:<20}  [R] {rms_r:6.2f} {'|'*vol_r}")
+                
+            except Exception as e:
+                print(f"Error: {e}")
+                break
+        
+        stream.stop_stream()
+        stream.close()
 
-    # 保存 WAV 文件
-    wf = wave.open(output_file, 'wb')
-    wf.setnchannels(CHANNELS)
-    wf.setsampwidth(p.get_sample_size(FORMAT))
-    wf.setframerate(RATE)
-    wf.writeframes(b''.join(frames))
-    wf.close()
+    t = threading.Thread(target=monitor_stereo, args=(dev,))
+    t.start()
+    threads.append(t)
 
-    print(f"[SAVED] {output_file}")
+else:
+    # -------------------------------
+    # 双设备模式 (原逻辑)
+    # -------------------------------
+    try:
+        devA = int(input("\nEnter Mic A index: "))
+        devB = int(input("Enter Mic B index: "))
+    except ValueError:
+        print("Invalid input.")
+        exit(1)
 
+    print(f"\n[INFO] Mic A: {p.get_device_info_by_index(devA)['name']}")
+    print(f"[INFO] Mic B: {p.get_device_info_by_index(devB)['name']}\n")
 
-# -------------------------------
-# 同时启动两个录音线程
-# -------------------------------
-threadA = threading.Thread(target=record_from_device, args=(devA, "mic_A.wav"))
-threadB = threading.Thread(target=record_from_device, args=(devB, "mic_B.wav"))
+    def monitor_device(device_index, label):
+        print(f"[START] Monitoring {label}: {device_index}")
+        try:
+            stream = p.open(
+                format=FORMAT,
+                channels=1,
+                rate=RATE,
+                input=True,
+                frames_per_buffer=CHUNK,
+                input_device_index=device_index
+            )
+        except Exception as e:
+            print(f"[ERROR] {label}: {e}")
+            return
 
-threadA.start()
-threadB.start()
+        while running:
+            try:
+                data = stream.read(CHUNK, exception_on_overflow=False)
+                audio_np = np.frombuffer(data, dtype=np.int16)
+                rms = np.sqrt(np.mean(audio_np**2))
+                vol = int(rms / 100)
+                print(f"[{label}] RMS={rms:6.2f} {'|'*vol}")
+            except Exception as e:
+                break
+        stream.stop_stream()
+        stream.close()
 
-threadA.join()
-threadB.join()
+    tA = threading.Thread(target=monitor_device, args=(devA, "Mic A"))
+    tB = threading.Thread(target=monitor_device, args=(devB, "Mic B"))
+    tA.start()
+    tB.start()
+    threads.extend([tA, tB])
 
-print("\n[DONE] 双麦克风录音完成！请检查 mic_A.wav 和 mic_B.wav 文件。\n")
+print("\n[INFO] 正在实时监听... 按 Ctrl+C 停止\n")
+
+try:
+    while True:
+        time.sleep(0.1)
+except KeyboardInterrupt:
+    print("\n[INFO] Stopping...")
+    running = False
+    for t in threads:
+        t.join()
+    p.terminate()
+    print("[DONE] Stopped.")
