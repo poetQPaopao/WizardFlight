@@ -9,7 +9,12 @@ import pygame
 from controls import ControlScheme, PoseControlSystem, PoseKeyState
 from player import Player
 from spell_system import SpellCaster, SpellManager, default_spellbook, match_voice_commands
-from audio import AudioInputConfig, MultiMicAudioController
+from audio import (
+    AudioInputConfig,
+    MultiMicAudioController,
+    MicrophoneConfigurationCancelled,
+    interactive_configure_microphones,
+)
 
 SCREEN_SIZE = (1280, 720)
 BACKGROUND = (18, 18, 28)
@@ -58,11 +63,6 @@ class VoiceSpellRequest:
     spell_name: str
     player_index: int
     last_reason: str = ""
-
-
-
-class MicrophoneConfigurationCancelled(Exception):
-    """Raised when the user aborts microphone selection (e.g., via Ctrl+C)."""
 
 
 class FlyingDemoGame:
@@ -331,69 +331,26 @@ class FlyingDemoGame:
             self.screen.blit(label, rect)
 
     def _setup_audio_inputs(self) -> None:
-        print("\nAudio Configuration Mode:")
-        print("1. Dual Device (Two separate microphones)")
-        print("2. Single Device (Stereo Split - Left=P1, Right=P2)")
-        
-        mode = "1"
-        while True:
-            try:
-                mode = input("Select mode (1/2) [default: 1]: ").strip() or "1"
-                if mode in ("1", "2"):
-                    break
-                print("Invalid selection.")
-            except KeyboardInterrupt:
-                raise MicrophoneConfigurationCancelled
-
-        configs: list[AudioInputConfig] = []
         self._player_sources.clear()
         self._source_to_player.clear()
+        player_names = [p.name for p in self.players]
 
         try:
-            if mode == "2":
-                # Stereo Split Mode
-                print("\n[Stereo Split Mode] Select the single device for both players.")
-                device_index = self._prompt_for_device_index("Stereo Input")
-                
-                # Player 1 -> Left Channel (1)
-                p1_source = self.players[0].name
-                self._player_sources[0] = p1_source
-                self._source_to_player[p1_source] = 0
-                configs.append(AudioInputConfig(
-                    source=p1_source, 
-                    device_index=device_index, 
-                    channel_mapping=[1]
-                ))
-                print(f"[voice] {p1_source} mapped to Left Channel of device {device_index}")
-
-                # Player 2 -> Right Channel (2)
-                p2_source = self.players[1].name
-                self._player_sources[1] = p2_source
-                self._source_to_player[p2_source] = 1
-                configs.append(AudioInputConfig(
-                    source=p2_source, 
-                    device_index=device_index, 
-                    channel_mapping=[2]
-                ))
-                print(f"[voice] {p2_source} mapped to Right Channel of device {device_index}")
-
-            else:
-                # Dual Device Mode (Original)
-                for idx, player in enumerate(self.players):
-                    device_index = self._prompt_for_device_index(player.name)
-                    source = player.name
-                    self._player_sources[idx] = source
-                    self._source_to_player[source] = idx
-                    configs.append(AudioInputConfig(source=source, device_index=device_index))
-                    if device_index is None:
-                        print(f"[voice] {player.name} microphone: default input")
-                    else:
-                        print(f"[voice] {player.name} microphone: device index {device_index}")
-
+            configs = interactive_configure_microphones(player_names)
         except MicrophoneConfigurationCancelled:
             print("\n[voice] Microphone configuration cancelled. Exiting game.")
             self.running = False
             return
+
+        # Rebuild mappings based on returned configs
+        for config in configs:
+            # Find which player this config belongs to
+            # We assume config.source is the player name
+            player_idx = next((i for i, p in enumerate(self.players) if p.name == config.source), None)
+            if player_idx is not None:
+                self._player_sources[player_idx] = config.source
+                self._source_to_player[config.source] = player_idx
+
         self.audio_controller = MultiMicAudioController(configs)
 
     def _reset_voice_state(self) -> None:
@@ -403,30 +360,6 @@ class FlyingDemoGame:
         self._voice_last_partial = {idx: "" for idx in range(player_count)}
         self._voice_prev_stage = {idx: "" for idx in range(player_count)}
         self._voice_last_errors.clear()
-
-    @staticmethod
-    def _prompt_for_device_index(player_name: str) -> Optional[int]:
-        devices = MultiMicAudioController.list_input_devices()
-        if devices:
-            print("\nAvailable microphones:")
-            for idx, name in devices:
-                print(f"  [{idx}] {name}")
-        else:
-            print("\nNo audio input devices detected by PyAudio; using system defaults.")
-        while True:
-            try:
-                raw = input(f"Enter microphone device index for {player_name} (blank for default): ").strip()
-            except EOFError:
-                return None
-            except KeyboardInterrupt:
-                print()
-                raise MicrophoneConfigurationCancelled
-            if raw == "":
-                return None
-            try:
-                return int(raw)
-            except ValueError:
-                print("Please enter a valid integer device index or leave blank.")
 
     def _enqueue_voice_spells(self, spell_names: Sequence[str], player_index: int, source: str) -> None:
         if not spell_names:

@@ -413,10 +413,95 @@ class MultiMicAudioController:
 		return devices
 
 
+class MicrophoneConfigurationCancelled(Exception):
+	"""Raised when the user aborts microphone selection (e.g., via Ctrl+C)."""
+
+
+def _prompt_for_device_index(player_name: str) -> Optional[int]:
+	devices = MultiMicAudioController.list_input_devices()
+	if devices:
+		print("\nAvailable microphones:")
+		for idx, name in devices:
+			print(f"  [{idx}] {name}")
+	else:
+		print("\nNo audio input devices detected by PyAudio; using system defaults.")
+	while True:
+		try:
+			raw = input(f"Enter microphone device index for {player_name} (blank for default): ").strip()
+		except EOFError:
+			return None
+		except KeyboardInterrupt:
+			print()
+			raise MicrophoneConfigurationCancelled
+		if raw == "":
+			return None
+		try:
+			return int(raw)
+		except ValueError:
+			print("Please enter a valid integer device index or leave blank.")
+
+
+def interactive_configure_microphones(player_names: List[str]) -> List[AudioInputConfig]:
+	print("\nAudio Configuration Mode:")
+	print("1. Dual Device (Two separate microphones)")
+	print("2. Single Device (Stereo Split - Left=P1, Right=P2)")
+	
+	mode = "1"
+	while True:
+		try:
+			mode = input("Select mode (1/2) [default: 1]: ").strip() or "1"
+			if mode in ("1", "2"):
+				break
+			print("Invalid selection.")
+		except KeyboardInterrupt:
+			raise MicrophoneConfigurationCancelled
+
+	configs: List[AudioInputConfig] = []
+
+	if mode == "2":
+		# Stereo Split Mode
+		print("\n[Stereo Split Mode] Select the single device for both players.")
+		device_index = _prompt_for_device_index("Stereo Input")
+		
+		if len(player_names) >= 1:
+			# Player 1 -> Left Channel (1)
+			p1_source = player_names[0]
+			configs.append(AudioInputConfig(
+				source=p1_source, 
+				device_index=device_index, 
+				channel_mapping=[1]
+			))
+			print(f"[voice] {p1_source} mapped to Left Channel of device {device_index}")
+
+		if len(player_names) >= 2:
+			# Player 2 -> Right Channel (2)
+			p2_source = player_names[1]
+			configs.append(AudioInputConfig(
+				source=p2_source, 
+				device_index=device_index, 
+				channel_mapping=[2]
+			))
+			print(f"[voice] {p2_source} mapped to Right Channel of device {device_index}")
+
+	else:
+		# Dual Device Mode (Original)
+		for name in player_names:
+			device_index = _prompt_for_device_index(name)
+			configs.append(AudioInputConfig(source=name, device_index=device_index))
+			if device_index is None:
+				print(f"[voice] {name} microphone: default input")
+			else:
+				print(f"[voice] {name} microphone: device index {device_index}")
+
+	return configs
+
+
 __all__ = [
 	"AudioListener",
 	"AudioInputConfig",
 	"TranscriptEvent",
 	"MultiMicAudioController",
+	"MicrophoneConfigurationCancelled",
+	"interactive_configure_microphones",
 ]
 
