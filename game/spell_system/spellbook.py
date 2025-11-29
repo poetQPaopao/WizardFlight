@@ -44,16 +44,40 @@ def build_frost_orb() -> SpellDefinition:
     )
 
 def build_healing_wave() -> SpellDefinition:
-    stats = SpellStats(damage=-30.0, speed=0.0, cost=20.0, radius=100.0, lifetime=0.0, cooldown=3.0)
+    # Healing Wave:
+    # - Does not move (speed=0)
+    # - Lasts for 1.0 second (lifetime=1.0)
+    # - Heals the caster (or anyone in range)
+    stats = SpellStats(damage=-30.0, speed=0.0, cost=20.0, radius=100.0, lifetime=1.0, cooldown=3.0, max_targets=10)
     return SpellDefinition(
         name="Healing Wave",
         stats=stats,
-        behavior_factory=lambda: [],
+        behavior_factory=lambda: [
+            LifetimeBehavior(), # Expires after lifetime
+            CollisionBehavior(friendly_fire=True), # Must hit self to heal
+        ],
         effect_factory=lambda: [
             DamageEffect(stats.damage),  # Negative damage for healing
         ],
         visual_factory=lambda: SimpleOrbVisual(color=(100, 255, 100), trail_color=(50, 200, 50)),
     )
+
+
+def build_custom_spell(name: str, image_path: str) -> SpellDefinition:
+    """Create a custom spell definition using a sprite image."""
+    # Default stats for custom spells
+    stats = SpellStats(damage=25.0, speed=450.0, cost=20.0, radius=40.0, lifetime=2.0, cooldown=0.5)
+    
+    base = BaseSpell(
+        name=name,
+        stats=stats,
+        effect_factory=lambda: [
+            DamageEffect(stats.damage),
+            KnockbackEffect(force=150.0),
+        ],
+        visual_factory=lambda: SpriteSpellVisual(image_path),
+    )
+    return base.to_definition()
 
 
 def default_spellbook() -> list[SpellDefinition]:
@@ -70,6 +94,11 @@ _VOICE_COMMAND_MAP: Dict[str, str] = {
     "heal": "Healing Wave",
     "healing": "Healing Wave",
 }
+
+
+def register_voice_command(keyword: str, spell_name: str) -> None:
+    """Register a new voice command mapping."""
+    _VOICE_COMMAND_MAP[keyword.lower()] = spell_name
 
 
 def voice_command_map() -> Dict[str, str]:

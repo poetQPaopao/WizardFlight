@@ -17,10 +17,15 @@ class SpellEffect:
 
 class DamageEffect(SpellEffect):
     def __init__(self, amount: float) -> None:
-        self.amount = max(0.0, amount)
+        # Allow negative amount for healing
+        self.amount = amount
 
     def apply(self, spell: Spell, target: Player) -> None:
-        target.apply_damage(self.amount)
+        if self.amount < 0:
+            target.heal(-self.amount)
+        else:
+            target.apply_damage(self.amount)
+
 
 
 class KnockbackEffect(SpellEffect):

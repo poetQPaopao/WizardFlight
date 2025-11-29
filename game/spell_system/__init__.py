@@ -6,11 +6,13 @@ from .casting import SpellCaster, SpellManager
 from .core import Spell, SpellContext, SpellDefinition, SpellStats
 from .effects import BurnEffect, DamageEffect, KnockbackEffect, SlowEffect, SpellEffect
 from .spellbook import (
+    build_custom_spell,
     build_fire_bolt,
     build_frost_orb,
     default_spellbook,
     match_voice_command,
     match_voice_commands,
+    register_voice_command,
     voice_command_map,
 )
 from .visuals import SimpleOrbVisual, SpellVisual
@@ -35,10 +37,12 @@ __all__ = [
     "KnockbackEffect",
     "SpellCaster",
     "SpellManager",
+    "build_custom_spell",
     "build_fire_bolt",
     "build_frost_orb",
     "default_spellbook",
     "voice_command_map",
     "match_voice_command",
     "match_voice_commands",
+    "register_voice_command",
 ]

@@ -63,13 +63,27 @@ class ChannelSelectMicrophoneStream:
 		if _sd is None:
 			raise RuntimeError("sounddevice is not installed")
 		
+		# Check device capabilities to avoid requesting more channels than available
+		max_hw_channels = 1
+		try:
+			info = _sd.query_devices(device=self.device_index, kind='input')
+			max_hw_channels = int(info.get('max_input_channels', 1))
+		except Exception:
+			pass
+
 		# Determine required number of channels to capture
-		# If we want channel 2, we must capture at least 2 channels.
-		# Also, if mapping is used, we prefer to open at least 2 channels (if possible)
-		# to prevent some drivers/devices from downmixing stereo to mono when channels=1 is requested.
 		req_channels = 1
 		if self.channel_mapping:
-			req_channels = max(max(self.channel_mapping), 2)
+			# We need at least the highest channel index requested
+			req_channels = max(self.channel_mapping)
+			
+			# DJI Fix: If hardware supports >= 2 channels, force 2 channels
+			# to prevent driver-side mono downmixing when only Ch 1 is requested.
+			if max_hw_channels >= 2:
+				req_channels = max(req_channels, 2)
+			
+			# Clamp to hardware limit to prevent "Invalid number of channels" error
+			req_channels = min(req_channels, max_hw_channels)
 		
 		kwargs = {
 			"samplerate": self.sample_rate,
@@ -169,10 +183,10 @@ class AudioListener:
 				self.command = text
 				self.command_stage = stage
 				self._latest_stage = stage
+				self._latest_sequence = self._command_seq
 				if event.end_of_turn:
 					self._command_seq += 1
 					incremented = True
-				self._latest_sequence = self._command_seq
 			if event.end_of_turn and not event.turn_is_formatted:
 				params = StreamingSessionParameters(format_turns=True)
 				self_client.set_params(params)

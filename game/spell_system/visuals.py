@@ -71,11 +71,33 @@ class SpriteSpellVisual(SpellVisual):
     def _load_image(self) -> pygame.Surface:
         if self._base_image is None:
             path = self.image_path
+            # If path is relative, try resolving it relative to CWD first (where assets/ usually is)
             if not path.is_absolute():
-                path = Path(__file__).resolve().parent / path
+                # Try CWD first
+                cwd_path = Path.cwd() / path
+                if cwd_path.exists():
+                    path = cwd_path
+                else:
+                    # Fallback to relative to this file (legacy behavior)
+                    rel_path = Path(__file__).resolve().parent / path
+                    if rel_path.exists():
+                        path = rel_path
+            
             if not path.exists():
-                raise FileNotFoundError(f"Sprite for spell visual not found: {path}")
-            self._base_image = pygame.image.load(str(path)).convert_alpha()
+                # Create a fallback surface if image is missing to prevent crash
+                print(f"[Visuals] Warning: Sprite not found at {path}, using fallback.")
+                fallback = pygame.Surface((32, 32), pygame.SRCALPHA)
+                pygame.draw.circle(fallback, (255, 0, 255), (16, 16), 16)
+                self._base_image = fallback
+            else:
+                try:
+                    self._base_image = pygame.image.load(str(path)).convert_alpha()
+                except pygame.error as e:
+                    print(f"[Visuals] Error loading image {path}: {e}")
+                    fallback = pygame.Surface((32, 32), pygame.SRCALPHA)
+                    pygame.draw.circle(fallback, (255, 0, 0), (16, 16), 16)
+                    self._base_image = fallback
+                    
         return self._base_image
 
     def _build_scaled_image(self, spell: Spell) -> pygame.Surface:

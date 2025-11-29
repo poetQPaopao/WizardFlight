@@ -220,6 +220,11 @@ class Player(pygame.sprite.Sprite):
             self.health = 0.0
             self.kill()
 
+    def heal(self, amount: float) -> None:
+        if amount <= 0 or not self.alive:
+            return
+        self.health = min(self.max_health, self.health + amount)
+
     def apply_knockback(self, impulse: pygame.Vector2) -> None:
         vector = pygame.Vector2(impulse)
         if vector.length_squared() <= 0:

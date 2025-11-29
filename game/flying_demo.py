@@ -8,13 +8,23 @@ from typing import Optional, Sequence
 import pygame
 from controls import ControlScheme, PoseControlSystem, PoseKeyState
 from player import Player
-from spell_system import SpellCaster, SpellManager, default_spellbook, match_voice_commands
+from spell_system import (
+    SpellCaster, 
+    SpellManager, 
+    default_spellbook, 
+    match_voice_commands,
+    build_custom_spell,
+    register_voice_command,
+    SpellDefinition
+)
 from audio import (
     AudioInputConfig,
     MultiMicAudioController,
     MicrophoneConfigurationCancelled,
     interactive_configure_microphones,
 )
+from image_gen import generate_pixel_art_spell_icon
+import os
 
 SCREEN_SIZE = (1280, 720)
 BACKGROUND = (18, 18, 28)
@@ -93,6 +103,7 @@ class FlyingDemoGame:
         self._voice_last_partial: dict[int, str] = {}
         self._voice_prev_stage: dict[int, str] = {}
         self._voice_last_errors: dict[str, str] = {}
+        self._custom_spells: list[SpellDefinition] = []
         self._initialize_round()
         if use_pose_input:
             self.pose_system = PoseControlSystem(max_players=len(self.players))
@@ -118,7 +129,7 @@ class FlyingDemoGame:
         ]
 
     def _build_spellcasters(self) -> list[SpellCaster]:
-        spell_defs = default_spellbook()
+        spell_defs = default_spellbook() + self._custom_spells
         casters: list[SpellCaster] = []
         for idx in range(len(self.players)):
             # Give everyone the full spellbook so they can cast any spell
@@ -180,37 +191,36 @@ class FlyingDemoGame:
             for source in list(self._voice_last_errors):
                 if source not in seen_sources:
                     del self._voice_last_errors[source]
-            for event in self.audio_controller.consume_final_events():
-                player_idx = self._source_to_player.get(event.source)
-                if player_idx is None:
-                    continue
-                print(f"[voice:{event.source}] transcript: {event.text}")
-                if not self._voice_blocked.get(player_idx, False):
-                    spell_names = match_voice_commands(event.text)
-                    if spell_names:
-                        self._enqueue_voice_spells(spell_names, player_idx, event.source)
 
+            # Process snapshots (both partial and final) to detect new commands incrementally
             for snapshot in self.audio_controller.snapshots():
                 player_idx = self._source_to_player.get(snapshot.source)
                 if player_idx is None:
                     continue
-                stage = snapshot.stage or ""
-                if stage != "final" and self._voice_prev_stage.get(player_idx) == "final":
-                    self._voice_blocked[player_idx] = False
-                    self._voice_last_partial[player_idx] = ""
-                partial_text = snapshot.text
-                if stage != "final" and partial_text:
-                    if partial_text != self._voice_last_partial.get(player_idx, ""):
-                        print(f"[voice:{snapshot.source}] partial: {partial_text}")
-                        self._voice_last_partial[player_idx] = partial_text
-                        if not self._voice_blocked.get(player_idx, False):
-                            spell_names = match_voice_commands(partial_text)
-                            if spell_names:
-                                self._enqueue_voice_spells(spell_names, player_idx, snapshot.source)
-                elif not partial_text and stage != "final":
-                    self._voice_last_partial[player_idx] = ""
-                    self._voice_blocked[player_idx] = False
-                self._voice_prev_stage[player_idx] = stage
+                
+                # Ensure state exists
+                if player_idx not in self._voice_processed_seq:
+                    self._voice_processed_seq[player_idx] = -1
+                    self._voice_processed_count[player_idx] = 0
+
+                # If this is a new utterance (sequence number changed), reset counter
+                if snapshot.sequence != self._voice_processed_seq[player_idx]:
+                    self._voice_processed_seq[player_idx] = snapshot.sequence
+                    self._voice_processed_count[player_idx] = 0
+                
+                if not snapshot.text:
+                    continue
+
+                # Match commands in the current text
+                found_spells = match_voice_commands(snapshot.text)
+                processed_count = self._voice_processed_count[player_idx]
+                
+                # If we found more commands than we previously processed for this utterance
+                if len(found_spells) > processed_count:
+                    new_spells = found_spells[processed_count:]
+                    print(f"[voice:{snapshot.source}] new commands: {new_spells} (from '{snapshot.text}')")
+                    self._enqueue_voice_spells(new_spells, player_idx, snapshot.source)
+                    self._voice_processed_count[player_idx] = len(found_spells)
 
 
         for idx, player in enumerate(self.players):
@@ -287,6 +297,8 @@ class FlyingDemoGame:
         self.player_spellcasters = self._build_spellcasters()
         if first_setup:
             self._setup_audio_inputs()
+            if self.running:
+                self._setup_custom_spells()
             if not self.running:
                 return
         self._reset_voice_state()
@@ -356,9 +368,8 @@ class FlyingDemoGame:
     def _reset_voice_state(self) -> None:
         player_count = len(self.players)
         self._pending_voice_spells.clear()
-        self._voice_blocked = {idx: False for idx in range(player_count)}
-        self._voice_last_partial = {idx: "" for idx in range(player_count)}
-        self._voice_prev_stage = {idx: "" for idx in range(player_count)}
+        self._voice_processed_seq = {idx: -1 for idx in range(player_count)}
+        self._voice_processed_count = {idx: 0 for idx in range(player_count)}
         self._voice_last_errors.clear()
 
     def _enqueue_voice_spells(self, spell_names: Sequence[str], player_index: int, source: str) -> None:
@@ -382,16 +393,55 @@ class FlyingDemoGame:
                     break
             if not matched:
                 print(f"[voice:{source}] no equipped spell matches '{spell_name}' for {self.players[player_index].name}")
-        if added:
-            self._voice_blocked[player_index] = True
 
     def _remove_voice_request(self, request: VoiceSpellRequest) -> None:
         try:
             self._pending_voice_spells.remove(request)
         except ValueError:
             return
-        if not any(item.player_index == request.player_index for item in self._pending_voice_spells):
-            self._voice_blocked[request.player_index] = False
+
+    def _setup_custom_spells(self) -> None:
+        print("\n--- Custom Spell Creation ---")
+        while True:
+            try:
+                choice = input("Do you want to create a custom spell? (y/n) [default: n]: ").strip().lower()
+                if choice != 'y':
+                    break
+                
+                name = input("Enter spell name (e.g. 'Lightning'): ").strip()
+                if not name:
+                    print("Name cannot be empty.")
+                    continue
+                
+                description = input("Enter visual description for icon generation (e.g. 'yellow lightning bolt'): ").strip()
+                if not description:
+                    print("Description cannot be empty.")
+                    continue
+                
+                # Generate icon
+                filename = f"{name.lower().replace(' ', '_')}.png"
+                output_path = os.path.join("assets", "custom_spells", filename)
+                
+                success = generate_pixel_art_spell_icon(description, output_path)
+                
+                if success:
+                    # Create spell definition
+                    spell_def = build_custom_spell(name, output_path)
+                    self._custom_spells.append(spell_def)
+                    
+                    # Register voice command
+                    # Use the name as the keyword
+                    register_voice_command(name, name)
+                    print(f"Successfully created spell '{name}'! You can cast it by saying '{name}'.")
+                    
+                    # Rebuild spellcasters to include new spell immediately
+                    self.player_spellcasters = self._build_spellcasters()
+                else:
+                    print("Failed to generate spell icon. Spell creation aborted.")
+                    
+            except KeyboardInterrupt:
+                print("\nSpell creation cancelled.")
+                break
 
 
 def run(*, use_pose_input: bool = True) -> None:
