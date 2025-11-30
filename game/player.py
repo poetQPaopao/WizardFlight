@@ -5,8 +5,8 @@ from typing import Optional, Sequence, Tuple, Union
 
 import pygame
 
-from controls import ControlScheme
-from status_effects import StatusEffect
+from controller import ControlScheme
+from spell_system.status_effects import StatusEffect
 
 Color = Tuple[int, int, int]
 Size = Tuple[int, int]
@@ -119,6 +119,8 @@ class Player(pygame.sprite.Sprite):
 
     @staticmethod
     def _rect_or_none(bounds: Optional[RectLike]) -> Optional[pygame.Rect]:
+        """Convert accepted rect inputs into a pygame.Rect when provided."""
+
         if bounds is None:
             return None
         return pygame.Rect(bounds)
@@ -213,6 +215,8 @@ class Player(pygame.sprite.Sprite):
         self.rect = rect
 
     def apply_damage(self, amount: float) -> None:
+        """Reduce health by ``amount`` and trigger kill when depleted."""
+
         if amount <= 0 or not self.alive:
             return
         self.health = max(0.0, self.health - amount)
@@ -221,41 +225,57 @@ class Player(pygame.sprite.Sprite):
             self.kill()
 
     def heal(self, amount: float) -> None:
+        """Restore health without exceeding ``max_health``."""
+
         if amount <= 0 or not self.alive:
             return
         self.health = min(self.max_health, self.health + amount)
 
     def apply_knockback(self, impulse: pygame.Vector2) -> None:
+        """Additive knockback impulse that decays via drag over time."""
+
         vector = pygame.Vector2(impulse)
         if vector.length_squared() <= 0:
             return
         self._knockback_velocity += vector * self.knockback_drag
 
     def apply_speed_multiplier(self, multiplier: float) -> None:
+        """Clamp the active speed multiplier against the provided value."""
+
         self._speed_multiplier = min(self._speed_multiplier, max(0.0, multiplier))
 
     def add_status(self, effect: StatusEffect) -> None:
+        """Queue a status effect so its ``tick`` method runs each update."""
+
         if not self.alive:
             return
         self._status_effects.append(effect)
 
     def mana_ratio(self) -> float:
+        """Return the normalized mana value between 0 and 1."""
+
         if self.max_mana <= 0:
             return 0.0
         return max(0.0, min(1.0, self.mana / self.max_mana))
 
     def can_spend_mana(self, amount: float) -> bool:
+        """Check whether the player currently holds enough mana."""
+
         if amount <= 0:
             return True
         return self.mana >= amount
 
     def spend_mana(self, amount: float) -> bool:
+        """Attempt to deduct mana, returning ``True`` on success."""
+
         if not self.can_spend_mana(amount) or not self.alive:
             return False
         self.mana = max(0.0, self.mana - max(0.0, amount))
         return True
 
     def aim_direction(self) -> pygame.Vector2:
+        """Return the normalized facing direction, defaulting forward."""
+
         direction = self._aim_direction.copy()
         if direction.length_squared() == 0:
             direction = pygame.Vector2(1, 0)
@@ -264,16 +284,22 @@ class Player(pygame.sprite.Sprite):
         return direction
 
     def spell_origin(self) -> pygame.Vector2:
+        """Return the point in front of the player where spells spawn."""
+
         direction = self.aim_direction()
         offset = direction * (max(self.rect.width, self.rect.height) * 0.6)
         return pygame.Vector2(self._position.x, self._position.y + self._bob_offset) + offset
 
     def _regen_mana(self, dt: float) -> None:
+        """Gradually restore mana over time when alive and below max."""
+
         if self.max_mana <= 0 or self.mana >= self.max_mana or dt <= 0 or not self.alive:
             return
         self.mana = min(self.max_mana, self.mana + self.mana_regen * dt)
 
     def _clamp_velocity_to_speed(self) -> None:
+        """Ensure movement velocity never exceeds the configured speed."""
+
         if self._velocity.length_squared() == 0:
             return
         max_speed = self.speed * self._speed_multiplier
@@ -285,6 +311,8 @@ class Player(pygame.sprite.Sprite):
             self._velocity.scale_to_length(max_speed)
 
     def _update_status_effects(self, dt: float) -> None:
+        """Tick active status effects and discard expired ones."""
+
         self._speed_multiplier = 1.0
         if not self._status_effects:
             return
@@ -295,6 +323,8 @@ class Player(pygame.sprite.Sprite):
         self._status_effects = survivors
 
     def _apply_knockback_damping(self, dt: float) -> None:
+        """Exponentially decay knockback velocity toward zero."""
+
         if self._knockback_velocity.length_squared() == 0 or dt <= 0:
             return
         decay = math.exp(-self.knockback_drag * dt)
@@ -308,6 +338,8 @@ class Player(pygame.sprite.Sprite):
         return self._current_velocity.copy()
 
     def kill(self) -> None:
+        """Mark the sprite as dead and clear motion state."""
+
         if not self.alive:
             return
         self.alive = False
@@ -321,4 +353,6 @@ class Player(pygame.sprite.Sprite):
 
     @property
     def is_alive(self) -> bool:
+        """Convenience flag mirroring ``alive`` for compatibility."""
+
         return self.alive

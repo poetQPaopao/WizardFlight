@@ -1,27 +1,19 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, Sequence
 
 import pygame
-from controls import ControlScheme, PoseControlSystem, PoseKeyState
+from controller import ControlScheme, PoseControlSystem, PoseKeyState, VoiceCommandManager
 from player import Player
 from spell_system import (
     SpellCaster, 
     SpellManager, 
     default_spellbook, 
-    match_voice_commands,
     build_custom_spell,
     register_voice_command,
     SpellDefinition
-)
-from audio import (
-    AudioInputConfig,
-    MultiMicAudioController,
-    MicrophoneConfigurationCancelled,
-    interactive_configure_microphones,
 )
 from image_gen import generate_pixel_art_spell_icon
 import os
@@ -32,6 +24,7 @@ FPS = 60
 BOUNDS_PADDING = 32
 
 def draw_health(surface: pygame.Surface, players: Sequence[Player], font: pygame.font.Font) -> None:
+    """Render health and mana bars for every player on the HUD surface."""
     bar_width = 220
     bar_height = 12
     spacing = 48
@@ -64,251 +57,186 @@ def draw_health(surface: pygame.Surface, players: Sequence[Player], font: pygame
 
 
 class GameState(Enum):
+    """Enumeration describing the possible round states."""
+
     RUNNING = auto()
     GAME_OVER = auto()
-
-
-@dataclass
-class VoiceSpellRequest:
-    spell_name: str
-    player_index: int
-    last_reason: str = ""
 
 
 class FlyingDemoGame:
     """Encapsulates the pygame setup, main loop, and pose input plumbing."""
 
     def __init__(self, *, use_pose_input: bool = True) -> None:
+        """Initialize pygame surfaces, systems, and optional pose input."""
+
         pygame.init()
-        self.screen = pygame.display.set_mode(SCREEN_SIZE)
+        self._screen = pygame.display.set_mode(SCREEN_SIZE)
         pygame.display.set_caption("Flying Player Demo")
-        self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("Inter", 20)
-        self.world_bounds = self.screen.get_rect().inflate(-BOUNDS_PADDING * 2, -BOUNDS_PADDING * 2)
+        self._clock = pygame.time.Clock()
+        self._font = pygame.font.SysFont("Inter", 20)
+        self._world_bounds = self._screen.get_rect().inflate(-BOUNDS_PADDING * 2, -BOUNDS_PADDING * 2)
         self.players: list[Player] = []
-        self.player_sprites = pygame.sprite.Group()
-        self.player_spellcasters: list[SpellCaster] = []
-        self.spell_manager: SpellManager = SpellManager(self.world_bounds)
-        self.pose_system = None
-        self.running = True
+        self._player_sprites = pygame.sprite.Group()
+        self._player_spellcasters: list[SpellCaster] = []
+        self._spell_manager: SpellManager = SpellManager(self._world_bounds)
+        self._pose_system: Optional[PoseControlSystem] = None
+        self._running = True
         self._pressed: Optional[Sequence[bool]] = None
-        self.audio_controller: Optional[MultiMicAudioController] = None
-        self._player_sources: dict[int, str] = {}
-        self._source_to_player: dict[str, int] = {}
         self.game_state = GameState.RUNNING
         self._winner_name: Optional[str] = None
         self._round_time = 0.0
-        self._pending_voice_spells: list[VoiceSpellRequest] = []
-        self._voice_blocked: dict[int, bool] = {}
-        self._voice_last_partial: dict[int, str] = {}
-        self._voice_prev_stage: dict[int, str] = {}
-        self._voice_last_errors: dict[str, str] = {}
         self._custom_spells: list[SpellDefinition] = []
+        self._voice_manager = VoiceCommandManager()
         self._initialize_round()
         if use_pose_input:
-            self.pose_system = PoseControlSystem(max_players=len(self.players))
-            if hasattr(self.pose_system, "reset"):
-                self.pose_system.reset()
+            self._pose_system = PoseControlSystem(max_players=len(self.players))
+            if hasattr(self._pose_system, "reset"):
+                self._pose_system.reset()
 
     def _create_players(self) -> list[Player]:
+        """Instantiate the default keyboard-controlled player roster."""
+
         return [
             Player(
                 name="Player 1",
                 position=(SCREEN_SIZE[0] * 0.25, SCREEN_SIZE[1] / 2),
                 controls=ControlScheme.wasd(),
                 color=(90, 200, 255),
-                bounds=self.world_bounds,
+                bounds=self._world_bounds,
             ),
             Player(
                 name="Player 2",
                 position=(SCREEN_SIZE[0] * 0.75, SCREEN_SIZE[1] / 2),
                 controls=ControlScheme.arrow_keys(),
                 color=(255, 180, 95),
-                bounds=self.world_bounds,
+                bounds=self._world_bounds,
             ),
         ]
 
     def _build_spellcasters(self) -> list[SpellCaster]:
+        """Create per-player spellcasters with the active spell list."""
+
         spell_defs = default_spellbook() + self._custom_spells
         casters: list[SpellCaster] = []
-        for idx in range(len(self.players)):
+        for _ in range(len(self.players)):
             # Give everyone the full spellbook so they can cast any spell
             casters.append(SpellCaster(spell_defs))
             
         return casters
 
     def run(self) -> None:
+        """Drive the main game loop until the window closes or quits."""
+
         try:
-            while self.running:
-                dt = self.clock.tick(FPS) / 1000.0
+            while self._running:
+                dt = self._clock.tick(FPS) / 1000.0
                 self._handle_events()
-                if not self.running:
+                if not self._running:
                     break
                 self._update(dt)
-                if not self.running:
+                if not self._running:
                     break
                 self._render()
         finally:
             self._shutdown()
 
     def _handle_events(self) -> None:
+        """Process pygame events and capture the current keyboard state."""
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                self.running = False
+                self._running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    self.running = False
+                    self._running = False
                 elif event.key == pygame.K_r and self.game_state == GameState.GAME_OVER:
                     self._initialize_round()
 
         self._pressed = pygame.key.get_pressed()
         if self._pressed[pygame.K_ESCAPE]:
-            self.running = False
+            self._running = False
 
     def _update(self, dt: float) -> None:
-        if self._pressed is None:
-            return
+        """Advance controllers, players, spells, and voice casting."""
 
-        if self.game_state != GameState.RUNNING:
+        if self._pressed is None or self.game_state != GameState.RUNNING:
             return
 
         self._round_time += dt
 
-        if self.pose_system:
-            self.pose_system.tick()
-            if self.pose_system.quit_requested:
-                self.running = False
+        if self._pose_system:
+            self._pose_system.tick()
+            if self._pose_system.quit_requested:
+                self._running = False
                 return
-        if self.audio_controller:
-            controller_errors = self.audio_controller.errors()
-            seen_sources = set()
-            for source, message in controller_errors:
-                seen_sources.add(source)
-                last = self._voice_last_errors.get(source)
-                if message != last:
-                    print(f"[voice:{source}] error: {message}")
-                    self._voice_last_errors[source] = message
-            for source in list(self._voice_last_errors):
-                if source not in seen_sources:
-                    del self._voice_last_errors[source]
 
-            # Process snapshots (both partial and final) to detect new commands incrementally
-            for snapshot in self.audio_controller.snapshots():
-                player_idx = self._source_to_player.get(snapshot.source)
-                if player_idx is None:
-                    continue
-                
-                # Ensure state exists
-                if player_idx not in self._voice_processed_seq:
-                    self._voice_processed_seq[player_idx] = -1
-                    self._voice_processed_count[player_idx] = 0
-
-                # If this is a new utterance (sequence number changed), reset counter
-                if snapshot.sequence != self._voice_processed_seq[player_idx]:
-                    self._voice_processed_seq[player_idx] = snapshot.sequence
-                    self._voice_processed_count[player_idx] = 0
-                
-                if not snapshot.text:
-                    continue
-
-                # Match commands in the current text
-                found_spells = match_voice_commands(snapshot.text)
-                processed_count = self._voice_processed_count[player_idx]
-                
-                # If we found more commands than we previously processed for this utterance
-                if len(found_spells) > processed_count:
-                    new_spells = found_spells[processed_count:]
-                    print(f"[voice:{snapshot.source}] new commands: {new_spells} (from '{snapshot.text}')")
-                    self._enqueue_voice_spells(new_spells, player_idx, snapshot.source)
-                    self._voice_processed_count[player_idx] = len(found_spells)
-
+        self._voice_manager.process_audio(self.players, self._player_spellcasters)
 
         for idx, player in enumerate(self.players):
             overrides: dict[int, bool] = {}
-            if self.pose_system:
-                overrides = self.pose_system.build_overrides(idx, player.controls)
+            if self._pose_system:
+                overrides = self._pose_system.build_overrides(idx, player.controls)
             pressed_for_player: Sequence[bool] = self._pressed
             if overrides:
                 pressed_for_player = PoseKeyState(overrides, self._pressed)
             player.update(dt, pressed_for_player)
-            caster = self.player_spellcasters[idx]
+            caster = self._player_spellcasters[idx]
             caster.update(dt)
             pressed_cast = bool(pressed_for_player[player.controls.cast])
-            
-            # Check for any pending voice request for this player
-            voice_request = next((r for r in self._pending_voice_spells if r.player_index == idx), None)
-            
-            cast_via_voice = False
-            if voice_request:
-                # Try to cast the specific spell requested by voice
-                if caster.handle_input(False, player, self.spell_manager, spell_name=voice_request.spell_name):
-                    print(f"[voice] cast spell: {voice_request.spell_name}")
-                    self._remove_voice_request(voice_request)
-                    cast_via_voice = True
-                else:
-                    # Provide feedback for failure (cooldown/mana)
-                    definition = next((d for d in caster.definitions if d.name == voice_request.spell_name), None)
-                    if definition:
-                        reason_message = ""
-                        cooldown = caster.cooldowns.get(definition.name, 0.0)
-                        if cooldown > 0:
-                            reason_message = (
-                                f"[voice] waiting for {definition.name} (cooldown {cooldown:.2f}s)"
-                            )
-                        elif not player.can_spend_mana(definition.stats.cost):
-                            reason_message = (
-                                f"[voice] waiting for {definition.name} (mana {player.mana:.1f}/{definition.stats.cost:.1f})"
-                            )
-                        if reason_message and reason_message != voice_request.last_reason:
-                            print(reason_message)
-                            voice_request.last_reason = reason_message
-                        if not reason_message:
-                            voice_request.last_reason = ""
 
-            # If not casting via voice, allow manual input (casts primary spell)
+            cast_via_voice = self._voice_manager.try_cast_for_player(idx, caster, player, self._spell_manager)
             if not cast_via_voice:
-                caster.handle_input(pressed_cast, player, self.spell_manager)
+                caster.handle_input(pressed_cast, player, self._spell_manager)
 
-        self.spell_manager.update(dt, self.players)
+        self._spell_manager.update(dt, self.players)
         self._evaluate_round_outcome()
 
     def _render(self) -> None:
-        self.screen.fill(BACKGROUND)
-        pygame.draw.rect(self.screen, (40, 40, 70), self.world_bounds, width=2, border_radius=8)
-        self.player_sprites.draw(self.screen)
-        self.spell_manager.draw(self.screen)
-        draw_health(self.screen, self.players, self.font)
+        """Draw arena bounds, sprites, spells, UI, and overlays."""
+
+        self._screen.fill(BACKGROUND)
+        pygame.draw.rect(self._screen, (40, 40, 70), self._world_bounds, width=2, border_radius=8)
+        self._player_sprites.draw(self._screen)
+        self._spell_manager.draw(self._screen)
+        draw_health(self._screen, self.players, self._font)
         if self.game_state == GameState.GAME_OVER:
             self._render_game_over()
         pygame.display.flip()
 
     def _shutdown(self) -> None:
-        if self.pose_system:
-            self.pose_system.shutdown()
-        if self.audio_controller:
-            self.audio_controller.stop()
+        """Release pose/audio controllers and close pygame."""
+
+        if self._pose_system:
+            self._pose_system.shutdown()
+        self._voice_manager.shutdown()
         pygame.quit()
 
     def _initialize_round(self) -> None:
-        first_setup = self.audio_controller is None
+        """Reset players, controllers, and timers to start a new round."""
+
+        first_setup = not self._voice_manager.configured
         self.players = self._create_players()
-        self.player_sprites = pygame.sprite.Group(*self.players)
-        self.spell_manager = SpellManager(self.world_bounds)
-        self.player_spellcasters = self._build_spellcasters()
+        self._player_sprites = pygame.sprite.Group(*self.players)
+        self._spell_manager = SpellManager(self._world_bounds)
+        self._player_spellcasters = self._build_spellcasters()
         if first_setup:
-            self._setup_audio_inputs()
-            if self.running:
-                self._setup_custom_spells()
-            if not self.running:
+            if not self._voice_manager.setup_audio_inputs(self.players):
+                self._running = False
                 return
-        self._reset_voice_state()
+            if self._running:
+                self._setup_custom_spells()
+            if not self._running:
+                return
+        self._voice_manager.reset(len(self.players))
         self._winner_name = None
         self._round_time = 0.0
         self.game_state = GameState.RUNNING
-        if self.pose_system and hasattr(self.pose_system, "reset"):
-            self.pose_system.reset()
+        if self._pose_system and hasattr(self._pose_system, "reset"):
+            self._pose_system.reset()
 
     def _evaluate_round_outcome(self) -> None:
+        """Mark the round complete once zero or one players remain alive."""
+
         if self.game_state != GameState.RUNNING:
             return
         living_players = [player for player in self.players if getattr(player, "is_alive", True)]
@@ -316,17 +244,19 @@ class FlyingDemoGame:
             return
         self.game_state = GameState.GAME_OVER
         self._winner_name = living_players[0].name if living_players else None
-        self._reset_voice_state()
-        for caster in self.player_spellcasters:
+        self._voice_manager.reset(len(self.players))
+        for caster in self._player_spellcasters:
             caster.reset_input_state()
-        self.spell_manager.clear()
+        self._spell_manager.clear()
         outcome = self._winner_name or "No one"
         print(f"[game] round over: {outcome} wins")
 
     def _render_game_over(self) -> None:
-        overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        """Draw a translucent overlay announcing the round winner."""
+
+        overlay = pygame.Surface(self._screen.get_size(), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 150))
-        self.screen.blit(overlay, (0, 0))
+        self._screen.blit(overlay, (0, 0))
 
         lines = ["Game Over"]
         if self._winner_name:
@@ -335,72 +265,16 @@ class FlyingDemoGame:
             lines.append("It's a draw!")
         lines.append("Press R to restart")
 
-        center_x = self.screen.get_width() // 2
-        center_y = self.screen.get_height() // 2
+        center_x = self._screen.get_width() // 2
+        center_y = self._screen.get_height() // 2
         for idx, text in enumerate(lines):
-            label = self.font.render(text, True, (240, 240, 255))
+            label = self._font.render(text, True, (240, 240, 255))
             rect = label.get_rect(center=(center_x, center_y + idx * 28))
-            self.screen.blit(label, rect)
-
-    def _setup_audio_inputs(self) -> None:
-        self._player_sources.clear()
-        self._source_to_player.clear()
-        player_names = [p.name for p in self.players]
-
-        try:
-            configs = interactive_configure_microphones(player_names)
-        except MicrophoneConfigurationCancelled:
-            print("\n[voice] Microphone configuration cancelled. Exiting game.")
-            self.running = False
-            return
-
-        # Rebuild mappings based on returned configs
-        for config in configs:
-            # Find which player this config belongs to
-            # We assume config.source is the player name
-            player_idx = next((i for i, p in enumerate(self.players) if p.name == config.source), None)
-            if player_idx is not None:
-                self._player_sources[player_idx] = config.source
-                self._source_to_player[config.source] = player_idx
-
-        self.audio_controller = MultiMicAudioController(configs)
-
-    def _reset_voice_state(self) -> None:
-        player_count = len(self.players)
-        self._pending_voice_spells.clear()
-        self._voice_processed_seq = {idx: -1 for idx in range(player_count)}
-        self._voice_processed_count = {idx: 0 for idx in range(player_count)}
-        self._voice_last_errors.clear()
-
-    def _enqueue_voice_spells(self, spell_names: Sequence[str], player_index: int, source: str) -> None:
-        if not spell_names:
-            return
-        if player_index >= len(self.player_spellcasters):
-            print(f"[voice:{source}] no spellcaster configured for player index {player_index}")
-            return
-        added = False
-        caster = self.player_spellcasters[player_index]
-        
-        for spell_name in spell_names:
-            matched = False
-            # Check if the caster has a definition for this spell
-            for definition in caster.definitions:
-                if definition.name.lower() == spell_name.lower():
-                    self._pending_voice_spells.append(VoiceSpellRequest(spell_name, player_index))
-                    print(f"[voice:{source}] matched spell: {spell_name}")
-                    added = True
-                    matched = True
-                    break
-            if not matched:
-                print(f"[voice:{source}] no equipped spell matches '{spell_name}' for {self.players[player_index].name}")
-
-    def _remove_voice_request(self, request: VoiceSpellRequest) -> None:
-        try:
-            self._pending_voice_spells.remove(request)
-        except ValueError:
-            return
+            self._screen.blit(label, rect)
 
     def _setup_custom_spells(self) -> None:
+        """Offer an interactive prompt to build and register custom spells."""
+
         print("\n--- Custom Spell Creation ---")
         while True:
             try:
@@ -435,7 +309,7 @@ class FlyingDemoGame:
                     print(f"Successfully created spell '{name}'! You can cast it by saying '{name}'.")
                     
                     # Rebuild spellcasters to include new spell immediately
-                    self.player_spellcasters = self._build_spellcasters()
+                    self._player_spellcasters = self._build_spellcasters()
                 else:
                     print("Failed to generate spell icon. Spell creation aborted.")
                     
@@ -445,6 +319,8 @@ class FlyingDemoGame:
 
 
 def run(*, use_pose_input: bool = True) -> None:
+    """Convenience helper that instantiates and runs the game loop."""
+
     game = FlyingDemoGame(use_pose_input=use_pose_input)
     game.run()
 

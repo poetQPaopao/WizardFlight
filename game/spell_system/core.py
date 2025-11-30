@@ -15,6 +15,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing helpers
 
 @dataclass(slots=True)
 class SpellStats:
+    """Tunable values shared across every runtime instance of a spell."""
+
     damage: float
     speed: float
     cost: float
@@ -26,6 +28,8 @@ class SpellStats:
 
 @dataclass(slots=True)
 class SpellContext:
+    """Bundle references passed into each behavior update call."""
+
     spell: "Spell"
     players: Sequence[Player]
     bounds: pygame.Rect
@@ -46,6 +50,8 @@ class Spell:
         effects: list["SpellEffect"],
         visual: "SpellVisual",
     ) -> None:
+        """Build a live spell with baked behaviors/effects/visuals."""
+
         self.name = name
         self.stats = stats
         self.caster = caster
@@ -69,12 +75,18 @@ class Spell:
             self.visual.on_spawn(self)
 
     def sync_geometry(self) -> None:
+        """Re-center the pygame.Rect using the logical position."""
+
         self.rect.center = (int(self.position.x), int(self.position.y))
 
     def kill(self) -> None:
+        """Mark the spell as dead without triggering any visual effects."""
+
         self.alive = False
 
     def update(self, dt: float, players: Sequence[Player], bounds: pygame.Rect) -> None:
+        """Advance behaviors, visuals, and age tracking."""
+
         if not self.alive:
             return
         if dt < 0:
@@ -89,12 +101,16 @@ class Spell:
             self.visual.update(self, dt)
 
     def draw(self, surface: pygame.Surface) -> None:
+        """Render either the visual helper or a fallback circle."""
+
         if not self.visual:
             pygame.draw.circle(surface, (255, 255, 255), self.rect.center, int(self.radius))
         else:
             self.visual.draw(surface, self)
 
     def apply_hit(self, target: Player) -> None:
+        """Apply spell effects to a target, respecting multi-hit limits."""
+
         if target in self._hit_targets or not self.alive:
             return
         for effect in self.effects:
@@ -107,6 +123,8 @@ class Spell:
 
 @dataclass(slots=True)
 class SpellDefinition:
+    """Factory inputs for instantiating spells on demand."""
+
     name: str
     stats: SpellStats
     behavior_factory: Callable[[], list["SpellBehavior"]]
@@ -114,6 +132,8 @@ class SpellDefinition:
     visual_factory: Callable[[], "SpellVisual"]
 
     def create_spell(self, caster: Player, position: pygame.Vector2, direction: pygame.Vector2) -> Spell:
+        """Instantiate a new ``Spell`` with fresh behaviors/effects/visuals."""
+
         return Spell(
             name=self.name,
             stats=self.stats,

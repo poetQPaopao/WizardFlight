@@ -11,9 +11,13 @@ class SpellVisual:
     """Responsible for rendering and one-off audio/particle hooks."""
 
     def on_spawn(self, spell: Spell) -> None:  # pragma: no cover - optional override
+        """Called once when the spell is created."""
+
         del spell
 
     def update(self, spell: Spell, dt: float) -> None:  # pragma: no cover - optional override
+        """Advance any visual-only state associated with the spell."""
+
         del spell, dt
 
     def draw(self, surface: pygame.Surface, spell: Spell) -> None:  # pragma: no cover
@@ -21,21 +25,31 @@ class SpellVisual:
 
 
 class SimpleOrbVisual(SpellVisual):
+    """Draws a glowing orb with a simple fading trail."""
+
     def __init__(self, color: tuple[int, int, int], trail_color: tuple[int, int, int] | None = None) -> None:
+        """Configure orb color and optional distinct trail color."""
+
         self.color = color
         self.trail_color = trail_color or color
         self._trail: list[pygame.Vector2] = []
         self._trail_length = 12
 
     def on_spawn(self, spell: Spell) -> None:
+        """Seed the trail with the initial spell position."""
+
         self._trail = [pygame.Vector2(spell.rect.center)]
 
     def update(self, spell: Spell, dt: float) -> None:
+        """Record the latest spell position while capping trail length."""
+
         self._trail.insert(0, pygame.Vector2(spell.rect.center))
         if len(self._trail) > self._trail_length:
             self._trail.pop()
 
     def draw(self, surface: pygame.Surface, spell: Spell) -> None:
+        """Render the fading trail followed by the orb itself."""
+
         for idx, pos in enumerate(self._trail):
             if idx == 0:
                 continue
@@ -61,6 +75,8 @@ class SpriteSpellVisual(SpellVisual):
         scale_to_radius: bool = True,
         scale_multiplier: float = 1.0,
     ) -> None:
+        """Describe how the sprite should be loaded, scaled, and rotated."""
+
         self.image_path = Path(image_path)
         self.rotate_with_velocity = rotate_with_velocity
         self.scale_to_radius = scale_to_radius
@@ -69,6 +85,8 @@ class SpriteSpellVisual(SpellVisual):
         self._scaled_image: pygame.Surface | None = None
 
     def _load_image(self) -> pygame.Surface:
+        """Load the sprite from disk once, falling back to a placeholder."""
+
         if self._base_image is None:
             path = self.image_path
             # If path is relative, try resolving it relative to CWD first (where assets/ usually is)
@@ -101,6 +119,8 @@ class SpriteSpellVisual(SpellVisual):
         return self._base_image
 
     def _build_scaled_image(self, spell: Spell) -> pygame.Surface:
+        """Return a scaled version of the sprite respecting spell radius."""
+
         base = self._load_image()
         if not self.scale_to_radius and self.scale_multiplier == 1.0:
             return base
@@ -121,9 +141,13 @@ class SpriteSpellVisual(SpellVisual):
         return pygame.transform.smoothscale(base, new_size)
 
     def on_spawn(self, spell: Spell) -> None:
+        """Prepare a scaled sprite copy for reuse during drawing."""
+
         self._scaled_image = self._build_scaled_image(spell)
 
     def draw(self, surface: pygame.Surface, spell: Spell) -> None:
+        """Blit the sprite, optionally rotated to match travel direction."""
+
         if self._scaled_image is None:
             self.on_spawn(spell)
         image = self._scaled_image

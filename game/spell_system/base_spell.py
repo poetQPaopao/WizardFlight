@@ -21,6 +21,8 @@ class BaseSpell:
         behavior_factory: Optional[Callable[[], list[SpellBehavior]]] = None,
         friendly_fire: bool = False,
     ) -> None:
+        """Store factories and defaults that drive derived spell definitions."""
+
         stats.max_targets = 1
         self.name = name
         self.stats = stats
@@ -30,6 +32,8 @@ class BaseSpell:
         self._friendly_fire = friendly_fire
 
     def _build_behaviors(self) -> list[SpellBehavior]:
+        """Construct default behaviors when no custom factory is provided."""
+
         if self._behavior_factory is not None:
             return self._behavior_factory()
         margin = self.stats.radius
@@ -41,6 +45,8 @@ class BaseSpell:
         ]
 
     def to_definition(self) -> SpellDefinition:
+        """Convert the helper into a ``SpellDefinition`` instance."""
+
         return SpellDefinition(
             name=self.name,
             stats=self.stats,

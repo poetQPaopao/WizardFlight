@@ -25,6 +25,8 @@ class PoseController:
     """Wraps MediaPipe Pose and exposes discrete pose states plus a turning slope."""
 
     def __init__(self, camera_index: int = 0, mirror: bool = True) -> None:
+        """Configure camera capture and prepare MediaPipe pose estimation."""
+
         self.camera_index = camera_index
         self.mirror = mirror
         self.available = bool(cv2 and mp)
@@ -39,6 +41,8 @@ class PoseController:
             self._boot_hardware()
 
     def _boot_hardware(self) -> None:
+        """Allocate the OpenCV capture and MediaPipe pose graph."""
+
         self._cap = cv2.VideoCapture(self.camera_index)
         if not self._cap.isOpened():
             self.available = False
@@ -47,6 +51,8 @@ class PoseController:
         self._pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
     def read(self) -> Optional[PoseState]:
+        """Grab a frame, infer pose landmarks, and update cached metrics."""
+
         if not self.available or self._cap is None or self._pose is None:
             return None
 
@@ -77,6 +83,8 @@ class PoseController:
         return self._last_state
 
     def _classify_state_metrics(self, landmarks) -> tuple[PoseState, float]:
+        """Return the inferred pose state and slope given landmark inputs."""
+
         mp_pose = mp.solutions.pose
         left_shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER]
         right_shoulder = landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER]
@@ -119,11 +127,15 @@ class PoseController:
         return PoseState.NO_POSE, slope
 
     def _classify_state(self, landmarks) -> PoseState:
+        """Persist slope state while returning the latest PoseState."""
+
         state, slope = self._classify_state_metrics(landmarks)
         self._last_slope = slope
         return state
 
     def _compute_confidence(self, landmarks) -> float:
+        """Estimate confidence based on key landmark visibility."""
+
         mp_pose = mp.solutions.pose
         key_points = [
             landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER],
@@ -137,25 +149,37 @@ class PoseController:
 
     @property
     def state(self) -> PoseState:
+        """Return the last classified pose state."""
+
         return self._last_state or PoseState.NO_POSE
 
     @property
     def frame(self):
+        """Expose the latest captured BGR frame for overlays."""
+
         return self._last_frame
 
     @property
     def landmarks(self):
+        """Expose MediaPipe's latest landmark packet, if present."""
+
         return self._last_landmarks
     
     @property
     def turn_slope(self) -> float:
+        """Return the horizontal slope derived from wrist offsets."""
+
         return self._last_slope
 
     @property
     def confidence(self) -> float:
+        """Return the most recent average visibility score."""
+
         return self._last_confidence
 
     def shutdown(self) -> None:
+        """Release camera resources and destroy pose estimators."""
+
         if self._cap is not None:
             self._cap.release()
             self._cap = None
@@ -164,6 +188,8 @@ class PoseController:
             self._pose = None
 
     def __del__(self) -> None:
+        """Ensure hardware resources are released on garbage collection."""
+
         self.shutdown()
 
 
@@ -171,6 +197,8 @@ class DualPoseController(PoseController):
     """Prototype controller that splits the camera feed for two independent poses."""
 
     def __init__(self, camera_index: int = 0, mirror: bool = True) -> None:
+        """Initialize two MediaPipe pose models fed by the same camera."""
+
         super().__init__(camera_index=camera_index, mirror=mirror)
         self._pair: tuple[PoseReading | None, PoseReading | None] = (None, None)
         self._pose_models: tuple[Any | None, Any | None] | None = None
@@ -239,6 +267,8 @@ class DualPoseController(PoseController):
         )
 
     def shutdown(self) -> None:
+        """Release both pose models in addition to base camera shutdown."""
+
         super().shutdown()
         if self._pose_models:
             for model in self._pose_models:

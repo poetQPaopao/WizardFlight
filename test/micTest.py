@@ -14,13 +14,11 @@ p = pyaudio.PyAudio()
 # 列出所有输入设备
 # -------------------------------
 print("Available input devices:\n")
-input_devices = []
 for i in range(p.get_device_count()):
     try:
         info = p.get_device_info_by_index(i)
         if info["maxInputChannels"] > 0:
             print(f"Index {i} — {info['name']}  (Channels: {info['maxInputChannels']})")
-            input_devices.append(i)
     except Exception:
         continue
 
@@ -48,6 +46,8 @@ if mode == "2":
     print(f"\n[INFO] Stereo Device: {p.get_device_info_by_index(dev)['name']}\n")
 
     def monitor_stereo(device_index):
+        """Stream a stereo device and print per-channel RMS levels."""
+
         print(f"[START] Monitoring Stereo Device: {device_index}")
         try:
             stream = p.open(
@@ -111,6 +111,8 @@ else:
     print(f"[INFO] Mic B: {p.get_device_info_by_index(devB)['name']}\n")
 
     def monitor_device(device_index, label):
+        """Stream a mono device and print live RMS levels."""
+
         print(f"[START] Monitoring {label}: {device_index}")
         try:
             stream = p.open(

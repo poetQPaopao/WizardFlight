@@ -15,6 +15,7 @@ from .spellbook import (
     register_voice_command,
     voice_command_map,
 )
+from .status_effects import StatusEffect, BurningStatus, SlowStatus, FrozenStatus
 from .visuals import SimpleOrbVisual, SpellVisual
 
 __all__ = [
@@ -35,6 +36,10 @@ __all__ = [
     "BurnEffect",
     "SlowEffect",
     "KnockbackEffect",
+    "StatusEffect",
+    "BurningStatus",
+    "SlowStatus",
+    "FrozenStatus",
     "SpellCaster",
     "SpellManager",
     "build_custom_spell",

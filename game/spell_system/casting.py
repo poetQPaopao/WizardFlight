@@ -12,6 +12,8 @@ class SpellCaster:
     """Handles cooldowns and input for multiple equipped spells."""
 
     def __init__(self, definitions: Sequence[SpellDefinition]) -> None:
+        """Store equipped spell definitions and initialize cooldown timers."""
+
         self.definitions = list(definitions)
         self.cooldowns: dict[str, float] = {d.name: 0.0 for d in definitions}
         self._was_pressed = False
@@ -27,12 +29,16 @@ class SpellCaster:
         return self.cooldowns.get(self.definition.name, 0.0) if self.definition else 0.0
 
     def update(self, dt: float) -> None:
+        """Reduce running cooldown timers using the supplied delta time."""
+
         if dt <= 0:
             return
         for name in self.cooldowns:
             self.cooldowns[name] = max(0.0, self.cooldowns[name] - dt)
 
     def handle_input(self, pressed: bool, player: Player, manager: "SpellManager", spell_name: str | None = None) -> bool:
+        """Handle button edges or explicit spell names to trigger casts."""
+
         if hasattr(player, "is_alive") and not player.is_alive:
             self._was_pressed = pressed
             return False
@@ -52,9 +58,13 @@ class SpellCaster:
         return cast
 
     def reset_input_state(self) -> None:
+        """Clear button state so edge detection works after interruptions."""
+
         self._was_pressed = False
 
     def _attempt_cast(self, player: Player, manager: "SpellManager", spell_name: str) -> bool:
+        """Validate mana/cooldown rules and spawn a spell when possible."""
+
         definition = next((d for d in self.definitions if d.name == spell_name), None)
         if not definition:
             return False
@@ -82,14 +92,22 @@ class SpellCaster:
 
 
 class SpellManager:
+    """Own spell entities, updating and drawing them each frame."""
+
     def __init__(self, bounds: pygame.Rect) -> None:
+        """Store arena bounds used for culling and collision checks."""
+
         self.bounds = bounds
         self._spells: list[Spell] = []
 
     def spawn(self, spell: Spell) -> None:
+        """Add a spell to the active list."""
+
         self._spells.append(spell)
 
     def update(self, dt: float, players: Sequence[Player]) -> None:
+        """Advance every spell and drop any that are no longer alive."""
+
         survivors: list[Spell] = []
         for spell in self._spells:
             spell.update(dt, players, self.bounds)
@@ -98,11 +116,12 @@ class SpellManager:
         self._spells = survivors
 
     def draw(self, surface: pygame.Surface) -> None:
+        """Render every spell to the supplied surface."""
+
         for spell in self._spells:
             spell.draw(surface)
 
     def clear(self) -> None:
-        self._spells.clear()
+        """Remove all active spells (e.g., between rounds)."""
 
-    def clear(self) -> None:
         self._spells.clear()

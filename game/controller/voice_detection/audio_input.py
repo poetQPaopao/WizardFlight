@@ -11,7 +11,6 @@ import threading
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Type
 
-import numpy as np
 import assemblyai as aai
 from assemblyai.streaming.v3 import (
 	BeginEvent,
@@ -55,11 +54,15 @@ class ChannelSelectMicrophoneStream:
 	"""Custom microphone stream that supports channel selection via mapping."""
 
 	def __init__(self, sample_rate: int = 48000, device_index: Optional[int] = None, channel_mapping: Optional[List[int]] = None):
+		"""Persist the capture parameters used for building the iterator."""
+
 		self.sample_rate = sample_rate
 		self.device_index = device_index
 		self.channel_mapping = channel_mapping
 
 	def __iter__(self):
+		"""Yield PCM chunks while optionally remapping requested channels."""
+
 		if _sd is None:
 			raise RuntimeError("sounddevice is not installed")
 		
@@ -131,6 +134,8 @@ class AudioListener:
 	"""Streaming microphone listener that keeps the latest transcript."""
 
 	def __init__(self, sample_rate: int = 48000, *, device_index: Optional[int] = None, source_name: Optional[str] = None, channel_mapping: Optional[List[int]] = None) -> None:
+		"""Configure AssemblyAI streaming with the given audio source details."""
+
 		self.sample_rate = sample_rate
 		self.device_index = device_index
 		self.channel_mapping = channel_mapping
@@ -335,6 +340,8 @@ class MultiMicAudioController:
 	"""Manage multiple ``AudioListener`` instances, one per microphone input."""
 
 	def __init__(self, configs: Sequence[AudioInputConfig], *, auto_start: bool = True) -> None:
+		"""Spin up listeners for each configuration and optionally start them."""
+
 		if not configs:
 			raise ValueError("At least one AudioInputConfig is required")
 		self.listeners: List[AudioListener] = [
@@ -432,6 +439,8 @@ class MicrophoneConfigurationCancelled(Exception):
 
 
 def _prompt_for_device_index(player_name: str) -> Optional[int]:
+	"""Ask the user to select a microphone device for the given player."""
+
 	devices = MultiMicAudioController.list_input_devices()
 	if devices:
 		print("\nAvailable microphones:")
@@ -456,6 +465,8 @@ def _prompt_for_device_index(player_name: str) -> Optional[int]:
 
 
 def interactive_configure_microphones(player_names: List[str]) -> List[AudioInputConfig]:
+	"""Interactively build audio configs for the provided player name list."""
+
 	print("\nAudio Configuration Mode:")
 	print("1. Dual Device (Two separate microphones)")
 	print("2. Single Device (Stereo Split - Left=P1, Right=P2)")

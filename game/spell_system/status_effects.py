@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 
 class StatusEffect:
     """Base class for temporary player modifiers such as burn or slow."""
@@ -17,6 +19,8 @@ class StatusEffect:
         return self.remaining > 0
 
     def apply(self, player: "Player", dt: float) -> None:  # pragma: no cover - interface hook
+        """Override in subclasses to implement per-frame behavior."""
+
         raise NotImplementedError
 
 
@@ -28,6 +32,8 @@ class BurningStatus(StatusEffect):
         self.damage_per_second = max(0.0, damage_per_second)
 
     def apply(self, player: "Player", dt: float) -> None:
+        """Deal damage over the supplied time slice."""
+
         player.apply_damage(self.damage_per_second * dt)
 
 
@@ -40,9 +46,12 @@ class SlowStatus(StatusEffect):
         self.slow_fraction = max(0.0, min(0.95, slow_fraction))
 
     def apply(self, player: "Player", dt: float) -> None:  # pragma: no cover - dt unused
+        """Halve player speed by applying a multiplicative slow multiplier."""
+
         del dt
         multiplier = max(0.05, 1.0 - self.slow_fraction)
         player.apply_speed_multiplier(multiplier)
+
 
 class FrozenStatus(StatusEffect):
     """Completely immobilizes the player for the duration."""
@@ -51,12 +60,11 @@ class FrozenStatus(StatusEffect):
         super().__init__(duration)
 
     def apply(self, player: "Player", dt: float) -> None:  # pragma: no cover - dt unused
+        """Stop all movement until the effect expires."""
+
         del dt
         player.apply_speed_multiplier(0.0)
 
-
-# Late import to avoid circular dependency during type checking.
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from player import Player

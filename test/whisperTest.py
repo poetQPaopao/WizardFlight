@@ -27,9 +27,13 @@ logger = logging.getLogger(__name__)
 last_transcript_time: float = 0.0
 
 def on_begin(self: Type[StreamingClient], event: BeginEvent):
+	"""Log the session identifier when the stream starts."""
+
 	print(f"Session started: {event.id}")
 
 def on_turn(self: Type[StreamingClient], event: TurnEvent):
+	"""Print streaming transcripts, labelling partial vs final turns."""
+
 	# Print only when we have text; label partial vs final
 	if event.transcript:
 		stage = "final" if event.end_of_turn else "partial"
@@ -45,14 +49,20 @@ def on_turn(self: Type[StreamingClient], event: TurnEvent):
 		self.set_params(params)
 
 def on_terminated(self: Type[StreamingClient], event: TerminationEvent):
+	"""Summarize audio duration when AssemblyAI ends the session."""
+
 	print(
 		f"Session terminated: {event.audio_duration_seconds} seconds of audio processed"
 	)
 
 def on_error(self: Type[StreamingClient], error: StreamingError):
+	"""Report streaming errors to stdout."""
+
 	print(f"Error occurred: {error}")
 
 def main():
+	"""Connect to AssemblyAI streaming and forward microphone audio."""
+
 	print("Connecting to AssemblyAI streaming…")
 	client = StreamingClient(
 		StreamingClientOptions(
@@ -75,6 +85,8 @@ def main():
 
 	# Start a small heartbeat thread that prints 'listening…' if no text yet
 	def heartbeat():
+		"""Emit a reminder if no transcript has been received recently."""
+
 		printed_hint = False
 		while True:
 			time.sleep(5)

@@ -6,7 +6,7 @@ from typing import Optional, Sequence, TYPE_CHECKING
 import pygame
 
 if TYPE_CHECKING:  # pragma: no cover - typing time only
-    from controller.pose_detection.pose_input import PoseReading
+    from .pose_detection.pose_input import PoseReading
 
 POSE_CONFIDENCE_THRESHOLD = 0.45
 POSE_SLOPE_DEADZONE = 0.2
@@ -49,15 +49,21 @@ class PoseKeyState(Sequence[bool]):
     """Sequence wrapper that overrides select keys with pose-driven values."""
 
     def __init__(self, overrides: dict[int, bool], fallback: Sequence[bool]) -> None:
+        """Store override map and fallback keyboard snapshot."""
+
         self._overrides = overrides
         self._fallback = fallback
 
     def __getitem__(self, key: int) -> bool:
+        """Return override if present; otherwise proxy the fallback state."""
+
         if key in self._overrides:
             return self._overrides[key]
         return self._fallback[key]
 
     def __len__(self) -> int:
+        """Mirror the length of the fallback key collection."""
+
         return len(self._fallback)
 
 
@@ -65,24 +71,26 @@ class PoseControlSystem:
     """Owns the pose-controller lifecycle and converts readings to key overrides."""
 
     def __init__(self, max_players: int, overlay_window: str = "Pose Input") -> None:
-        self.max_players = max_players
-        self.overlay_window = overlay_window
-        self.controller = self._build_pose_controller()
+        """Create the controller wrapper and prepare per-player readings."""
+
+        self._max_players = max_players
+        self._overlay_window = overlay_window
+        self._controller = self._build_pose_controller()
         self._readings: list[Optional["PoseReading"]] = [None] * max_players
         self._quit_requested = False
 
     def tick(self) -> None:
         """Refresh pose readings and note if the overlay window requested exit."""
         self._quit_requested = False
-        if not self.controller:
+        if not self._controller:
             self._set_idle_state()
             return
         try:
-            raw_readings = self.controller.read_pair()
+            raw_readings = self._controller.read_pair()
         except Exception as exc:  # pragma: no cover - hardware specific
             print(f"[pose] Controller error: {exc}")
-            self.controller.shutdown()
-            self.controller = None
+            self._controller.shutdown()
+            self._controller = None
             self._set_idle_state()
             return
         self._sync_readings(raw_readings)
@@ -97,52 +105,64 @@ class PoseControlSystem:
 
     @property
     def quit_requested(self) -> bool:
+        """Expose whether the overlay window asked the game to exit."""
+
         return self._quit_requested
 
     @property
     def active(self) -> bool:
-        return self.controller is not None
+        """Return ``True`` when the underlying controller is live."""
+
+        return self._controller is not None
 
     def shutdown(self) -> None:
         """Tear down the controller and close any overlay windows."""
-        if self.controller:
-            self.controller.shutdown()
-            self.controller = None
+        if self._controller:
+            self._controller.shutdown()
+            self._controller = None
         try:
             import cv2
 
-            cv2.destroyWindow(self.overlay_window)
+            cv2.destroyWindow(self._overlay_window)
         except Exception:  # pragma: no cover - best effort cleanup
             pass
 
     def _sync_readings(self, raw_readings: Sequence[Optional["PoseReading"]]) -> None:
+        """Copy live readings into a fixed-length list aligned to players."""
+
         self._readings = [
-            raw_readings[idx] if idx < len(raw_readings) else None for idx in range(self.max_players)
+            raw_readings[idx] if idx < len(raw_readings) else None for idx in range(self._max_players)
         ]
 
     def _set_idle_state(self) -> None:
-        self._readings = [None] * self.max_players
+        """Reset readings when the controller is offline."""
+
+        self._readings = [None] * self._max_players
 
     def _show_overlay(self, raw_readings: Sequence[Optional["PoseReading"]]) -> None:
-        if not self.controller:
+        """Render the debug overlay and monitor exit key presses."""
+
+        if not self._controller:
             return
         try:
-            from controller.pose_detection.pose_input_test import draw_dual_overlay
+            from .pose_detection.pose_input_test import draw_dual_overlay
             import cv2
         except ImportError:
             return
 
-        overlay = draw_dual_overlay(self.controller.frame, raw_readings)
+        overlay = draw_dual_overlay(self._controller.frame, raw_readings)
         if overlay is not None:
-            cv2.imshow(self.overlay_window, overlay)
+            cv2.imshow(self._overlay_window, overlay)
             key = cv2.waitKey(1) & 0xFF
             if key in (27, ord("q"), ord("Q")):
                 self._quit_requested = True
 
     @staticmethod
     def _build_pose_controller():
+        """Instantiate the optional DualPoseController if available."""
+
         try:
-            from controller.pose_detection.pose_input import DualPoseController
+            from .pose_detection.pose_input import DualPoseController
         except ImportError:
             return None
 
@@ -160,7 +180,7 @@ def pose_reading_to_overrides(
     if reading is None or reading.confidence < POSE_CONFIDENCE_THRESHOLD:
         return {}
     try:
-        from controller.pose_detection.pose_input import PoseState
+        from .pose_detection.pose_input import PoseState
     except ImportError:
         return {}
 

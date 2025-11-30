@@ -10,6 +10,8 @@ from .visuals import SimpleOrbVisual, SpriteSpellVisual
 
 
 def build_fire_bolt() -> SpellDefinition:
+    """Construct the default Fire Bolt spell definition."""
+
     stats = SpellStats(damage=22.0, speed=520.0, cost=25.0, radius=50.0, lifetime=1.5, cooldown=0.45)
     base = BaseSpell(
         name="Fire Bolt",
@@ -25,6 +27,8 @@ def build_fire_bolt() -> SpellDefinition:
 
 
 def build_frost_orb() -> SpellDefinition:
+    """Return the Frost Orb definition featuring slow and knockback."""
+
     stats = SpellStats(damage=12.0, speed=360.0, cost=18.0, radius=14.0, lifetime=2.4, cooldown=0.6, max_targets=2)
     return SpellDefinition(
         name="Frost Orb",
@@ -44,6 +48,8 @@ def build_frost_orb() -> SpellDefinition:
     )
 
 def build_healing_wave() -> SpellDefinition:
+    """Create a non-moving healing pulse that favors self-targeting."""
+
     # Healing Wave:
     # - Does not move (speed=0)
     # - Lasts for 1.0 second (lifetime=1.0)
@@ -81,6 +87,8 @@ def build_custom_spell(name: str, image_path: str) -> SpellDefinition:
 
 
 def default_spellbook() -> list[SpellDefinition]:
+    """Return the baseline trio of spells available to every caster."""
+
     return [build_fire_bolt(), build_frost_orb(), build_healing_wave()]
 
 

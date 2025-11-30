@@ -26,6 +26,8 @@ STATE_LABELS = {
 WINDOW_NAME = "Pose Input Test"
 
 def format_states(active_state: PoseState) -> str:
+    """Return a human-friendly label string highlighting the active state."""
+
     parts = []
     for state in PoseState:
         marker = ">" if state == active_state else " "
@@ -34,6 +36,8 @@ def format_states(active_state: PoseState) -> str:
 
 
 def draw_overlay(frame, landmarks, state: PoseState, confidence: float, slope: float):
+    """Render a single-player overlay containing pose landmarks and metrics."""
+
     if frame is None:
         return None
     output = frame.copy()
@@ -71,6 +75,8 @@ def draw_overlay(frame, landmarks, state: PoseState, confidence: float, slope: f
 
 
 def draw_dual_overlay(frame, readings: tuple[PoseReading | None, PoseReading | None]):
+    """Render left/right overlays for each PoseReading in dual mode."""
+
     if frame is None:
         return None
     output = frame.copy()
@@ -148,6 +154,8 @@ def draw_dual_overlay(frame, readings: tuple[PoseReading | None, PoseReading | N
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI flags controlling single vs dual pose visualization."""
+
     parser = argparse.ArgumentParser(description="Pose overlay visualizer.")
     parser.add_argument(
         "--dual",
@@ -158,9 +166,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Entry point for the pose overlay visualizer test harness."""
+
     args = parse_args()
-    ControllerCls = DualPoseController if args.dual else PoseController
-    controller = ControllerCls()
+    controller_cls = DualPoseController if args.dual else PoseController
+    controller = controller_cls()
     try:
         if isinstance(controller, DualPoseController):
             while True:
