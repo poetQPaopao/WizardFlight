@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Sequence
 
 from .base_spell import BaseSpell
-from .behaviors import BoundsBehavior, CollisionBehavior, LinearMovementBehavior, LifetimeBehavior
+from .behaviors import BoundsBehavior, CollisionBehavior, HomingMovmentBehavior, TargetMovementBehavior, LifetimeBehavior
 from .core import SpellDefinition, SpellStats
 from .effects import BurnEffect, DamageEffect, KnockbackEffect, SlowEffect
 from .visuals import SimpleOrbVisual, SpriteSpellVisual
@@ -16,6 +16,12 @@ def build_fire_bolt() -> SpellDefinition:
     base = BaseSpell(
         name="Fire Bolt",
         stats=stats,
+        behavior_factory=lambda: [
+            TargetMovementBehavior(),
+            LifetimeBehavior(),
+            BoundsBehavior(margin=stats.radius),
+            CollisionBehavior(),
+        ],
         effect_factory=lambda: [
             DamageEffect(stats.damage),
             BurnEffect(duration=2.5, dps=8.0),
@@ -35,7 +41,7 @@ def build_frost_orb() -> SpellDefinition:
         name="Frost Orb",
         stats=stats,
         behavior_factory=lambda: [
-            LinearMovementBehavior(),
+            HomingMovmentBehavior(),
             LifetimeBehavior(),
             BoundsBehavior(margin=stats.radius),
             CollisionBehavior(),

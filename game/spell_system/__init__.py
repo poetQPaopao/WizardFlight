@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 from .base_spell import BaseSpell
-from .behaviors import BoundsBehavior, CollisionBehavior, LinearMovementBehavior, LifetimeBehavior, SpellBehavior
+from .behaviors import (
+    BoundsBehavior,
+    CollisionBehavior,
+    LinearMovementBehavior,
+    LifetimeBehavior,
+    SpellBehavior,
+    HomingMovmentBehavior,
+    TargetMovementBehavior
+)
 from .casting import SpellCaster, SpellManager
 from .core import Spell, SpellContext, SpellDefinition, SpellStats
 from .effects import BurnEffect, DamageEffect, KnockbackEffect, SlowEffect, SpellEffect
@@ -24,6 +32,8 @@ __all__ = [
     "SpellVisual",
     "SpellEffect",
     "LinearMovementBehavior",
+    "HomingMovmentBehavior",
+    "TargetOnCastMovementBehavior",
     "LifetimeBehavior",
     "BoundsBehavior",
     "CollisionBehavior",
