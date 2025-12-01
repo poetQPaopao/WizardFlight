@@ -88,11 +88,25 @@ def build_custom_spell(
 ) -> SpellDefinition:
     """Create a custom spell definition using a sprite image."""
     # Default stats for custom spells
-    stats = SpellStats(damage=25.0, speed=450.0, cost=20.0, radius=40.0, lifetime=2.0, cooldown=0.5)
+    params = generate_parameters(name)
+    stats = SpellStats(
+        damage=params.get("damage", 25.0),
+        speed=params.get("speed", 450.0),
+        cost=params.get("cost", 20.0),
+        radius=params.get("radius", 40.0),
+        lifetime=params.get("lifetime", 2.0),
+        cooldown=params.get("cooldown", 0.5),
+    )
     
     base = BaseSpell(
         name=name,
         stats=stats,
+        behavior_factory=lambda: [
+            HomingMovmentBehavior(),
+            LifetimeBehavior(),
+            BoundsBehavior(margin=stats.radius),
+            CollisionBehavior(),
+        ],
         behavior_factory=lambda: [
             HomingMovmentBehavior(),
             LifetimeBehavior(),
@@ -121,7 +135,8 @@ def generate_parameters(description: str) -> dict[str, float]:
         "cooldown": 0.5,
     }
 
-    client = genai.Client(api_key='AIzaSyCorUATvMRJ7VO0aFWJeRj8Jjyk8wqt_Fw')
+    # client = genai.Client(api_key='AIzaSyCorUATvMRJ7VO0aFWJeRj8Jjyk8wqt_Fw')
+    client  = genai.Client()
 
     content = (f"parameters for fire ball: stats = SpellStats(damage=12.0, speed=360.0, cost=18.0, radius=14.0, lifetime=2.4, cooldown=0.6, max_targets=2). Parameters for ice bolt: stats = SpellStats(damage=12.0, speed=360.0, cost=18.0, radius=14.0, lifetime=2.4, cooldown=0.6, max_targets=2). Generate spell parameters based on the previous format and the following description: {description}")
     response = client.models.generate_content(
@@ -156,5 +171,7 @@ def default_spellbook() -> list[SpellDefinition]:
     """Return the baseline trio of spells available to every caster."""
 
     return [build_fire_bolt(), build_frost_orb(), build_healing_wave()]
+
+
 
 

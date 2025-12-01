@@ -16,7 +16,7 @@ def generate_pixel_art_spell_icon(description: str, output_path: str) -> bool:
     print(f"[ImageGen] Generating icon for: {description}...")
     
     # Construct a prompt that enforces pixel art style
-    prompt = f"A pixel art style icon for a magic spell representing '{description}'. The icon should be suitable for a retro video game, clean pixel art, 64x64 style, on a dark background or transparent if possible."
+    prompt = f"A pixel art style icon for a magic spell representing '{description}'. The icon should be suitable for a retro video game, clean pixel art, 64x64 style, on a dark background or transparent if possible. No watermark."
 
     messages = [
         {
