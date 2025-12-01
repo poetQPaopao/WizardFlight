@@ -54,7 +54,7 @@ def _print_devices() -> None:
         print(f"  [{idx}] {name}")
 
 
-def _run_listener(args: argparse.Namespace) -> int:
+def _start_listener(args: argparse.Namespace):
     mapping = _parse_channel_mapping(args.channel_mapping)
     listener = audio_input.AudioListener(
         sample_rate=args.sample_rate,
@@ -63,18 +63,21 @@ def _run_listener(args: argparse.Namespace) -> int:
         source_name=args.source_name,
         api_key=args.api_key,
     )
-
     print(
         f"[voice:{listener.source}] starting stream (rate={listener.sample_rate}, "
         f"device={listener.device_index}, mapping={mapping or 'mono'})"
     )
+    listener.start()
+    return listener
+
+
+def _run_listener(args: argparse.Namespace) -> int:
     try:
-        listener.start()
+        listener = _start_listener(args)
     except Exception as exc:
         print(f"Failed to start listener: {exc}")
         return 1
 
-    last_partial = ""
     last_final_seq = -1
     print("Speak into the microphone. Partial and final transcripts will appear below (Ctrl+C to stop).")
     try:
@@ -89,12 +92,8 @@ def _run_listener(args: argparse.Namespace) -> int:
                 print(f"[final #{event.sequence} {event.source}] {event.text}")
 
             snapshot = listener.snapshot()
-            if snapshot.stage == "partial" and snapshot.text and snapshot.text != last_partial:
-                last_partial = snapshot.text
-                print(f"[partial {snapshot.source}] {snapshot.text}")
-            elif snapshot.stage == "final" and snapshot.text and snapshot.sequence != last_final_seq:
+            if snapshot.stage == "final" and snapshot.text and snapshot.sequence != last_final_seq:
                 last_final_seq = snapshot.sequence
-                print(f"[final {snapshot.source}] {snapshot.text}")
 
             if not listener.running:
                 print("[voice] listener stopped unexpectedly.")
@@ -121,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma-separated channel numbers to capture (e.g., '1' for left, '1,2' for stereo).",
     )
     parser.add_argument("--source-name", type=str, default="mic-test", help="Label used in printed output.")
-    parser.add_argument("--poll-interval", type=float, default=0.1, help="Seconds between transcript polls.")
+    parser.add_argument("--poll-interval", type=float, default=0.05, help="Seconds between transcript polls.")
     parser.add_argument(
         "--api-key",
         type=str,

@@ -152,6 +152,7 @@ class AudioListener:
         self._command_consumed: int = 0
         self._latest_stage: str = ""
         self._latest_sequence: int = 0
+        self._awaiting_formatted_final: bool = False
 
         self._client: Optional[StreamingClient] = None
         self._thread: Optional[threading.Thread] = None
@@ -181,6 +182,7 @@ class AudioListener:
         self._error = None
         self._final_event.clear()
         self._command_consumed = self._command_seq
+        self._awaiting_formatted_final = False
 
     def _create_client(self) -> StreamingClient:
         return StreamingClient(
@@ -204,20 +206,28 @@ class AudioListener:
             return
         text = event.transcript.strip().lower()
         stage = "final" if event.end_of_turn else "partial"
-        incremented = False
         with self._lock:
             self.command = text
             self.command_stage = stage
             self._latest_stage = stage
             self._latest_sequence = self._command_seq
-            if event.end_of_turn:
-                self._command_seq += 1
-                incremented = True
-        if event.end_of_turn and not event.turn_is_formatted:
+        if not event.end_of_turn:
+            return
+
+        # AssemblyAI may send an unformatted final first, followed by a formatted
+        # final (with punctuation). Only mark the turn complete on a formatted
+        # final to avoid double final events for the same utterance.
+        if not event.turn_is_formatted:
+            self._awaiting_formatted_final = True
             params = StreamingSessionParameters(format_turns=True)
             self_client.set_params(params)
-        if event.end_of_turn and incremented:
-            self._final_event.set()
+            return
+
+        self._awaiting_formatted_final = False
+        with self._lock:
+            self._command_seq += 1
+            self._latest_sequence = self._command_seq
+        self._final_event.set()
 
     def _handle_termination(self, self_client: Type[StreamingClient], event: TerminationEvent) -> None:  # noqa: ARG002
         self._final_event.set()

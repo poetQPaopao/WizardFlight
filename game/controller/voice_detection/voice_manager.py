@@ -32,7 +32,6 @@ class VoiceCommandManager:
         self._pending_requests: list[VoiceSpellRequest] = []
         self._voice_last_errors: dict[str, str] = {}
         self._voice_processed_seq: dict[int, int] = {}
-        self._voice_processed_count: dict[int, int] = {}
         self._audio_controller: Optional[MultiMicAudioController] = None
 
     @property
@@ -74,14 +73,13 @@ class VoiceCommandManager:
 
         self._pending_requests.clear()
         self._voice_processed_seq = {idx: -1 for idx in range(player_count)}
-        self._voice_processed_count = {idx: 0 for idx in range(player_count)}
         self._voice_last_errors.clear()
 
     def process_audio(
         self,
         players: Sequence["Player"],
     ) -> None:
-        """Consume audio snapshots and enqueue new spell commands."""
+        """Consume final transcripts and enqueue new spell commands."""
 
         if not self._audio_controller:
             return
@@ -98,35 +96,34 @@ class VoiceCommandManager:
             if source not in seen_sources:
                 del self._voice_last_errors[source]
 
-        for snapshot in self._audio_controller.snapshots():
-            player_idx = self._source_to_player.get(snapshot.source)
+        for event in self._audio_controller.consume_final_events():
+            player_idx = self._source_to_player.get(event.source)
             if player_idx is None or player_idx >= len(players):
                 continue
-            player = players[player_idx]
 
             if player_idx not in self._voice_processed_seq:
                 self._voice_processed_seq[player_idx] = -1
-                self._voice_processed_count[player_idx] = 0
-
-            if snapshot.sequence != self._voice_processed_seq[player_idx]:
-                self._voice_processed_seq[player_idx] = snapshot.sequence
-                self._voice_processed_count[player_idx] = 0
-
-            if not snapshot.text:
+            if event.sequence <= self._voice_processed_seq[player_idx]:
                 continue
 
-            found_spells = player.match_voice_commands(snapshot.text)
-            processed_count = self._voice_processed_count[player_idx]
-            if len(found_spells) > processed_count:
-                new_spells = found_spells[processed_count:]
-                print(f"[voice:{snapshot.source}] new commands: {new_spells} (from '{snapshot.text}')")
-                self._enqueue_voice_spells(
-                    new_spells,
-                    player_idx,
-                    snapshot.source,
-                    players,
-                )
-                self._voice_processed_count[player_idx] = len(found_spells)
+            transcript = event.text.strip()
+            if not transcript:
+                continue
+
+            player = players[player_idx]
+            found_spells = player.match_voice_commands(transcript)
+            if not found_spells:
+                self._voice_processed_seq[player_idx] = event.sequence
+                continue
+
+            print(f"[voice:{event.source}] new commands: {found_spells} (from '{transcript}')")
+            self._enqueue_voice_spells(
+                found_spells,
+                player_idx,
+                event.source,
+                players,
+            )
+            self._voice_processed_seq[player_idx] = event.sequence
 
     def try_cast_for_player(
         self,
