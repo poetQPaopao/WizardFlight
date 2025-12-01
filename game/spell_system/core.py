@@ -5,9 +5,8 @@ from typing import TYPE_CHECKING, Callable, Sequence
 
 import pygame
 
-from player import Player
-
 if TYPE_CHECKING:  # pragma: no cover - typing helpers
+    from player import Player
     from .behaviors import SpellBehavior
     from .effects import SpellEffect
     from .visuals import SpellVisual
@@ -130,6 +129,20 @@ class SpellDefinition:
     behavior_factory: Callable[[], list["SpellBehavior"]]
     effect_factory: Callable[[], list["SpellEffect"]]
     visual_factory: Callable[[], "SpellVisual"]
+    voice_triggers: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Normalize voice trigger keywords for consistent matching."""
+
+        triggers: list[str] = []
+        seen: set[str] = set()
+        for keyword in self.voice_triggers or ():
+            cleaned = keyword.strip().lower()
+            if not cleaned or cleaned in seen:
+                continue
+            triggers.append(cleaned)
+            seen.add(cleaned)
+        object.__setattr__(self, "voice_triggers", tuple(triggers))
 
     def create_spell(self, caster: Player, position: pygame.Vector2, direction: pygame.Vector2) -> Spell:
         """Instantiate a new ``Spell`` with fresh behaviors/effects/visuals."""

@@ -8,12 +8,10 @@ import pygame
 from controller import ControlScheme, PoseControlSystem, PoseKeyState, VoiceCommandManager
 from player import Player
 from spell_system import (
-    SpellCaster, 
-    SpellManager, 
-    default_spellbook, 
+    SpellManager,
+    default_spellbook,
     build_custom_spell,
-    register_voice_command,
-    SpellDefinition
+    SpellDefinition,
 )
 from image_gen import generate_pixel_art_spell_icon
 import os
@@ -76,8 +74,6 @@ class FlyingDemoGame:
         self._font = pygame.font.SysFont("Inter", 20)
         self._world_bounds = self._screen.get_rect().inflate(-BOUNDS_PADDING * 2, -BOUNDS_PADDING * 2)
         self.players: list[Player] = []
-        self._player_sprites = pygame.sprite.Group()
-        self._player_spellcasters: list[SpellCaster] = []
         self._spell_manager: SpellManager = SpellManager(self._world_bounds)
         self._pose_system: Optional[PoseControlSystem] = None
         self._running = True
@@ -85,7 +81,10 @@ class FlyingDemoGame:
         self.game_state = GameState.RUNNING
         self._winner_name: Optional[str] = None
         self._round_time = 0.0
-        self._custom_spells: list[SpellDefinition] = []
+        self._spell_library: dict[str, SpellDefinition] = {
+            spell.name: spell for spell in default_spellbook()
+        }
+        self._player_spellbooks: list[list[str]] = []
         self._voice_manager = VoiceCommandManager()
         self._initialize_round()
         if use_pose_input:
@@ -101,6 +100,7 @@ class FlyingDemoGame:
                 name="Player 1",
                 position=(SCREEN_SIZE[0] * 0.25, SCREEN_SIZE[1] / 2),
                 controls=ControlScheme.wasd(),
+                spellbook=default_spellbook(),
                 color=(90, 200, 255),
                 bounds=self._world_bounds,
             ),
@@ -108,21 +108,11 @@ class FlyingDemoGame:
                 name="Player 2",
                 position=(SCREEN_SIZE[0] * 0.75, SCREEN_SIZE[1] / 2),
                 controls=ControlScheme.arrow_keys(),
+                spellbook=default_spellbook(),
                 color=(255, 180, 95),
                 bounds=self._world_bounds,
             ),
         ]
-
-    def _build_spellcasters(self) -> list[SpellCaster]:
-        """Create per-player spellcasters with the active spell list."""
-
-        spell_defs = default_spellbook() + self._custom_spells
-        casters: list[SpellCaster] = []
-        for _ in range(len(self.players)):
-            # Give everyone the full spellbook so they can cast any spell
-            casters.append(SpellCaster(spell_defs))
-            
-        return casters
 
     def run(self) -> None:
         """Drive the main game loop until the window closes or quits."""
@@ -170,7 +160,7 @@ class FlyingDemoGame:
                 self._running = False
                 return
 
-        self._voice_manager.process_audio(self.players, self._player_spellcasters)
+        self._voice_manager.process_audio(self.players)
 
         for idx, player in enumerate(self.players):
             overrides: dict[int, bool] = {}
@@ -180,13 +170,12 @@ class FlyingDemoGame:
             if overrides:
                 pressed_for_player = PoseKeyState(overrides, self._pressed)
             player.update(dt, pressed_for_player)
-            caster = self._player_spellcasters[idx]
-            caster.update(dt)
+            player.update_spellcasting(dt)
             pressed_cast = bool(pressed_for_player[player.controls.cast])
 
-            cast_via_voice = self._voice_manager.try_cast_for_player(idx, caster, player, self._spell_manager)
+            cast_via_voice = self._voice_manager.try_cast_for_player(idx, player, self._spell_manager)
             if not cast_via_voice:
-                caster.handle_input(pressed_cast, player, self._spell_manager)
+                player.handle_cast_input(pressed_cast, self._spell_manager)
 
         self._spell_manager.update(dt, self.players)
         self._evaluate_round_outcome()
@@ -196,7 +185,8 @@ class FlyingDemoGame:
 
         self._screen.fill(BACKGROUND)
         pygame.draw.rect(self._screen, (40, 40, 70), self._world_bounds, width=2, border_radius=8)
-        self._player_sprites.draw(self._screen)
+        for player in self.players:
+            self._screen.blit(player.image, player.rect)
         self._spell_manager.draw(self._screen)
         draw_health(self._screen, self.players, self._font)
         if self.game_state == GameState.GAME_OVER:
@@ -216,9 +206,7 @@ class FlyingDemoGame:
 
         first_setup = not self._voice_manager.configured
         self.players = self._create_players()
-        self._player_sprites = pygame.sprite.Group(*self.players)
         self._spell_manager = SpellManager(self._world_bounds)
-        self._player_spellcasters = self._build_spellcasters()
         if first_setup:
             if not self._voice_manager.setup_audio_inputs(self.players):
                 self._running = False
@@ -245,8 +233,8 @@ class FlyingDemoGame:
         self.game_state = GameState.GAME_OVER
         self._winner_name = living_players[0].name if living_players else None
         self._voice_manager.reset(len(self.players))
-        for caster in self._player_spellcasters:
-            caster.reset_input_state()
+        for player in self.players:
+            player.reset_spellcasting_state()
         self._spell_manager.clear()
         outcome = self._winner_name or "No one"
         print(f"[game] round over: {outcome} wins")
@@ -291,6 +279,12 @@ class FlyingDemoGame:
                 if not description:
                     print("Description cannot be empty.")
                     continue
+                voice_text = input(
+                    "Enter comma-separated voice keywords (default uses spell name): "
+                ).strip()
+                voice_triggers = [token.strip() for token in voice_text.split(',') if token.strip()]
+                if not voice_triggers:
+                    voice_triggers = [name]
                 
                 # Generate icon
                 filename = f"{name.lower().replace(' ', '_')}.png"
@@ -300,22 +294,70 @@ class FlyingDemoGame:
                 
                 if success:
                     # Create spell definition
-                    spell_def = build_custom_spell(name, output_path)
-                    self._custom_spells.append(spell_def)
-                    
-                    # Register voice command
-                    # Use the name as the keyword
-                    register_voice_command(name, name)
-                    print(f"Successfully created spell '{name}'! You can cast it by saying '{name}'.")
-                    
-                    # Rebuild spellcasters to include new spell immediately
-                    self._player_spellcasters = self._build_spellcasters()
+                    spell_def = build_custom_spell(name, output_path, voice_triggers=voice_triggers)
+                    self._spell_library[spell_def.name] = spell_def
+                    self._assign_custom_spell_to_players(spell_def)
+                    print(
+                        f"Successfully created spell '{name}'! Voice keywords: {', '.join(voice_triggers)}"
+                    )
                 else:
                     print("Failed to generate spell icon. Spell creation aborted.")
                     
             except KeyboardInterrupt:
                 print("\nSpell creation cancelled.")
                 break
+
+    def _assign_custom_spell_to_players(self, spell_def: SpellDefinition) -> None:
+        """Ask which players should learn ``spell_def`` and update loadouts."""
+
+        if not self.players:
+            return
+        prompt = (
+            "Assign this spell to players by name or number (comma separated, 'all' for everyone) [default: all]: "
+        )
+        selection = input(prompt).strip().lower()
+        if selection in ("", "all"):
+            indices = list(range(len(self.players)))
+        else:
+            indices = self._parse_player_selection(selection)
+            if not indices:
+                print("No valid players selected. Assigning to everyone by default.")
+                indices = list(range(len(self.players)))
+        for idx in indices:
+            if idx >= len(self._player_spellbooks):
+                self._player_spellbooks.append(self._all_spell_names())
+            book = self._player_spellbooks[idx]
+            if spell_def.name not in book:
+                book.append(spell_def.name)
+
+    def _parse_player_selection(self, selection: str) -> list[int]:
+        """Convert a comma-separated selection string to player indices."""
+
+        if not selection:
+            return []
+        lookup = {player.name.lower(): idx for idx, player in enumerate(self.players)}
+        indices: list[int] = []
+        for token in selection.split(','):
+            candidate = token.strip()
+            if not candidate:
+                continue
+            if candidate.isdigit():
+                idx = int(candidate) - 1
+                if 0 <= idx < len(self.players):
+                    indices.append(idx)
+                continue
+            idx = lookup.get(candidate.lower())
+            if idx is not None:
+                indices.append(idx)
+        # Preserve order of appearance but drop duplicates
+        seen: set[int] = set()
+        ordered: list[int] = []
+        for idx in indices:
+            if idx in seen:
+                continue
+            seen.add(idx)
+            ordered.append(idx)
+        return ordered
 
 
 def run(*, use_pose_input: bool = True) -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Sequence
 
 from .base_spell import BaseSpell
 from .behaviors import BoundsBehavior, CollisionBehavior, LinearMovementBehavior, LifetimeBehavior
@@ -21,7 +21,8 @@ def build_fire_bolt() -> SpellDefinition:
             BurnEffect(duration=2.5, dps=8.0),
             KnockbackEffect(force=180.0),
         ],
-        visual_factory=lambda: SpriteSpellVisual("output.jpg"),
+        visual_factory=lambda: SimpleOrbVisual(color=(255, 100, 23), trail_color=(255, 185, 150)),
+        voice_triggers=("fire", "fire bolt", "fireball", "flame"),
     )
     return base.to_definition()
 
@@ -45,6 +46,7 @@ def build_frost_orb() -> SpellDefinition:
             KnockbackEffect(force=140.0),
         ],
         visual_factory=lambda: SimpleOrbVisual(color=(150, 220, 255), trail_color=(90, 190, 255)),
+        voice_triggers=("frost", "frost orb", "freeze", "ice", "ice bolt"),
     )
 
 def build_healing_wave() -> SpellDefinition:
@@ -66,10 +68,16 @@ def build_healing_wave() -> SpellDefinition:
             DamageEffect(stats.damage),  # Negative damage for healing
         ],
         visual_factory=lambda: SimpleOrbVisual(color=(100, 255, 100), trail_color=(50, 200, 50)),
+        voice_triggers=("heal", "healing", "healing wave"),
     )
 
 
-def build_custom_spell(name: str, image_path: str) -> SpellDefinition:
+def build_custom_spell(
+    name: str,
+    image_path: str,
+    *,
+    voice_triggers: Sequence[str] | None = None,
+) -> SpellDefinition:
     """Create a custom spell definition using a sprite image."""
     # Default stats for custom spells
     stats = SpellStats(damage=25.0, speed=450.0, cost=20.0, radius=40.0, lifetime=2.0, cooldown=0.5)
@@ -82,6 +90,7 @@ def build_custom_spell(name: str, image_path: str) -> SpellDefinition:
             KnockbackEffect(force=150.0),
         ],
         visual_factory=lambda: SpriteSpellVisual(image_path),
+        voice_triggers=voice_triggers or (name,),
     )
     return base.to_definition()
 
@@ -90,61 +99,3 @@ def default_spellbook() -> list[SpellDefinition]:
     """Return the baseline trio of spells available to every caster."""
 
     return [build_fire_bolt(), build_frost_orb(), build_healing_wave()]
-
-
-_VOICE_COMMAND_MAP: Dict[str, str] = {
-    "fire": "Fire Bolt",
-    "fireball": "Fire Bolt",
-    "flame": "Fire Bolt",
-    "freeze": "Frost Orb",
-    "ice": "Frost Orb",
-    "icebolt": "Frost Orb",
-    "heal": "Healing Wave",
-    "healing": "Healing Wave",
-}
-
-
-def register_voice_command(keyword: str, spell_name: str) -> None:
-    """Register a new voice command mapping."""
-    _VOICE_COMMAND_MAP[keyword.lower()] = spell_name
-
-
-def voice_command_map() -> Dict[str, str]:
-    """Return a copy of the keyword-to-spell mapping for voice control."""
-
-    return dict(_VOICE_COMMAND_MAP)
-
-
-def match_voice_commands(transcript: str) -> list[str]:
-    """Return all spell names mentioned in ``transcript`` in spoken order."""
-
-    if not transcript:
-        return []
-    lowered = transcript.lower()
-    matches: List[Tuple[int, str, str]] = []
-    for keyword, spell_name in _VOICE_COMMAND_MAP.items():
-        index = lowered.find(keyword)
-        if index == -1:
-            continue
-        matches.append((index, keyword, spell_name))
-
-    if not matches:
-        return []
-
-    matches.sort(key=lambda item: (item[0], -len(item[1])))
-
-    result: list[str] = []
-    seen: set[str] = set()
-    for _, _, spell_name in matches:
-        if spell_name in seen:
-            continue
-        result.append(spell_name)
-        seen.add(spell_name)
-    return result
-
-
-def match_voice_command(transcript: str) -> str | None:
-    """Backward-compatible helper returning only the first matched spell."""
-
-    matches = match_voice_commands(transcript)
-    return matches[0] if matches else None

@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence, TYPE_CHECKING
 
-from spell_system import match_voice_commands
-
 from .audio_input import (
     MicrophoneConfigurationCancelled,
     MultiMicAudioController,
@@ -13,7 +11,6 @@ from .audio_input import (
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from player import Player
-    from spell_system import SpellCaster
     from spell_system.casting import SpellManager
 
 
@@ -83,7 +80,6 @@ class VoiceCommandManager:
     def process_audio(
         self,
         players: Sequence["Player"],
-        spellcasters: Sequence["SpellCaster"],
     ) -> None:
         """Consume audio snapshots and enqueue new spell commands."""
 
@@ -104,8 +100,9 @@ class VoiceCommandManager:
 
         for snapshot in self._audio_controller.snapshots():
             player_idx = self._source_to_player.get(snapshot.source)
-            if player_idx is None or player_idx >= len(spellcasters):
+            if player_idx is None or player_idx >= len(players):
                 continue
+            player = players[player_idx]
 
             if player_idx not in self._voice_processed_seq:
                 self._voice_processed_seq[player_idx] = -1
@@ -118,7 +115,7 @@ class VoiceCommandManager:
             if not snapshot.text:
                 continue
 
-            found_spells = match_voice_commands(snapshot.text)
+            found_spells = player.match_voice_commands(snapshot.text)
             processed_count = self._voice_processed_count[player_idx]
             if len(found_spells) > processed_count:
                 new_spells = found_spells[processed_count:]
@@ -128,14 +125,12 @@ class VoiceCommandManager:
                     player_idx,
                     snapshot.source,
                     players,
-                    spellcasters,
                 )
                 self._voice_processed_count[player_idx] = len(found_spells)
 
     def try_cast_for_player(
         self,
         player_index: int,
-        caster: "SpellCaster",
         player: "Player",
         spell_manager: "SpellManager",
     ) -> bool:
@@ -145,18 +140,18 @@ class VoiceCommandManager:
         if not request:
             return False
 
-        if caster.handle_input(False, player, spell_manager, spell_name=request.spell_name):
+        if player.cast_spell_by_name(request.spell_name, spell_manager):
             print(f"[voice] cast spell: {request.spell_name}")
             self._remove_request(request)
             return True
 
-        definition = next((definition for definition in caster.definitions if definition.name == request.spell_name), None)
+        definition = player.get_spell_definition(request.spell_name)
         if not definition:
             self._remove_request(request)
             return False
 
         reason_message = ""
-        cooldown = caster.cooldowns.get(definition.name, 0.0)
+        cooldown = player.spell_cooldown(definition.name)
         if cooldown > 0:
             reason_message = f"[voice] waiting for {definition.name} (cooldown {cooldown:.2f}s)"
         elif not player.can_spend_mana(definition.stats.cost):
@@ -183,27 +178,21 @@ class VoiceCommandManager:
         player_index: int,
         source: str,
         players: Sequence["Player"],
-        spellcasters: Sequence["SpellCaster"],
     ) -> None:
         """Queue valid spells referenced in the transcript for a player."""
 
         if not spell_names:
             return
-        if player_index >= len(spellcasters) or player_index >= len(players):
-            print(f"[voice:{source}] no spellcaster configured for player index {player_index}")
+        if player_index >= len(players):
+            print(f"[voice:{source}] no player configured for index {player_index}")
             return
 
-        caster = spellcasters[player_index]
         player = players[player_index]
         for spell_name in spell_names:
-            matched = False
-            for definition in caster.definitions:
-                if definition.name.lower() == spell_name.lower():
-                    self._pending_requests.append(VoiceSpellRequest(spell_name, player_index))
-                    print(f"[voice:{source}] matched spell: {spell_name}")
-                    matched = True
-                    break
-            if not matched:
+            if player.knows_spell(spell_name):
+                self._pending_requests.append(VoiceSpellRequest(spell_name, player_index))
+                print(f"[voice:{source}] matched spell: {spell_name}")
+            else:
                 print(f"[voice:{source}] no equipped spell matches '{spell_name}' for {player.name}")
 
     def _remove_request(self, request: VoiceSpellRequest) -> None:

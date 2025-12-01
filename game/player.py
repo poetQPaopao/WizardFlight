@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import math
-from typing import Optional, Sequence, Tuple, Union
+from typing import Optional, Sequence, Tuple, Union, TYPE_CHECKING
 
 import pygame
 
 from controller import ControlScheme
+from spell_system.casting import SpellCaster
+from spell_system.core import SpellDefinition
 from spell_system.status_effects import StatusEffect
+
+if TYPE_CHECKING:  # pragma: no cover - typing helpers
+    from spell_system.casting import SpellManager
 
 Color = Tuple[int, int, int]
 Size = Tuple[int, int]
@@ -31,6 +36,7 @@ class Player(pygame.sprite.Sprite):
         name: str,
         position: Tuple[float, float],
         controls: ControlScheme,
+        spellbook: Sequence[SpellDefinition],
         color: Color = (240, 240, 240),
         size: Size = (48, 32),
         speed: float = 320.0,
@@ -74,12 +80,17 @@ class Player(pygame.sprite.Sprite):
         self.mana_regen = max(0.0, mana_regen)
         self.mana = self.max_mana
         self.bar_color = bar_color or color
+        self._spell_loadout: list[str] = []
+        self._active_spell_index = -1
+        self._spellbook: list[SpellDefinition] = []
+        self.spellcaster: Optional[SpellCaster] = None
 
         self._base_image = self._build_initial_sprite(sprite, size, color)
         self.image = self._base_image
         self.rect = self.image.get_rect(center=position)
         self._position = pygame.Vector2(self.rect.center)
         self._apply_visual_state(0.0)
+        self.set_spellbook(spellbook)
 
     def _build_initial_sprite(
         self,
@@ -289,6 +300,117 @@ class Player(pygame.sprite.Sprite):
         direction = self.aim_direction()
         offset = direction * (max(self.rect.width, self.rect.height) * 0.6)
         return pygame.Vector2(self._position.x, self._position.y + self._bob_offset) + offset
+
+    def set_spellbook(self, spell_definitions: Sequence[SpellDefinition]) -> None:
+        """Equip a spellbook and rebuild the internal spellcaster."""
+
+        definitions: list[SpellDefinition] = []
+        seen: set[str] = set()
+        for definition in spell_definitions:
+            if not definition or definition.name in seen:
+                continue
+            definitions.append(definition)
+            seen.add(definition.name)
+        self._spellbook = definitions
+        self._spell_loadout = [definition.name for definition in definitions]
+        self._active_spell_index = 0 if self._spell_loadout else -1
+        self.spellcaster = SpellCaster(definitions) if definitions else None
+
+    def current_spell_name(self) -> Optional[str]:
+        """Return the active spell name if a loadout has been configured."""
+
+        if 0 <= self._active_spell_index < len(self._spell_loadout):
+            return self._spell_loadout[self._active_spell_index]
+        return None
+
+    def cycle_spell(self, step: int = 1) -> None:
+        """Move the active slot forwards or backwards by ``step``."""
+
+        if not self._spell_loadout:
+            return
+        total = len(self._spell_loadout)
+        self._active_spell_index = (self._active_spell_index + step) % total
+
+    def select_spell(self, name: str) -> bool:
+        """Activate ``name`` if it exists in the current loadout."""
+
+        try:
+            index = self._spell_loadout.index(name)
+        except ValueError:
+            return False
+        self._active_spell_index = index
+        return True
+
+    @property
+    def spell_loadout(self) -> tuple[str, ...]:
+        """Expose the configured spell names for debugging/UI."""
+
+        return tuple(self._spell_loadout)
+
+    @property
+    def spellbook(self) -> tuple[SpellDefinition, ...]:
+        """Return the equipped spell definitions."""
+
+        return tuple(self._spellbook)
+
+    def knows_spell(self, spell_name: str) -> bool:
+        """Return ``True`` if ``spell_name`` exists in the spellbook."""
+
+        target = spell_name.strip().lower()
+        if not target:
+            return False
+        return any(definition.name.lower() == target for definition in self._spellbook)
+
+    def get_spell_definition(self, spell_name: str) -> Optional[SpellDefinition]:
+        """Return the spell definition matching ``spell_name`` if known."""
+
+        target = spell_name.strip().lower()
+        if not target:
+            return None
+        for definition in self._spellbook:
+            if definition.name.lower() == target:
+                return definition
+        return None
+
+    def spell_cooldown(self, spell_name: str) -> float:
+        """Return the remaining cooldown for ``spell_name`` if tracked."""
+
+        if not self.spellcaster:
+            return 0.0
+        return self.spellcaster.cooldowns.get(spell_name, 0.0)
+
+    def match_voice_commands(self, transcript: str) -> list[str]:
+        """Return ordered spell names matched from a phrase."""
+
+        if not transcript or not self.spellcaster:
+            return []
+        return self.spellcaster.match_voice_commands(transcript)
+
+    def handle_cast_input(self, pressed: bool, manager: "SpellManager") -> bool:
+        """Process manual cast button state using the equipped spellcaster."""
+
+        if not self.spellcaster:
+            return False
+        return self.spellcaster.handle_input(pressed, self, manager)
+
+    def cast_spell_by_name(self, spell_name: str, manager: "SpellManager") -> bool:
+        """Attempt to cast a specific spell immediately (e.g., voice command)."""
+
+        if not self.spellcaster:
+            return False
+        return self.spellcaster.handle_input(False, self, manager, spell_name=spell_name)
+
+    def update_spellcasting(self, dt: float) -> None:
+        """Tick cooldown timers for the equipped spellcaster."""
+
+        if self.spellcaster:
+            self.spellcaster.update(dt)
+
+    def reset_spellcasting_state(self) -> None:
+        """Clear casting button memory to avoid false edges."""
+
+        if self.spellcaster:
+            self.spellcaster.reset_input_state()
 
     def _regen_mana(self, dt: float) -> None:
         """Gradually restore mana over time when alive and below max."""

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from .behaviors import BoundsBehavior, CollisionBehavior, LinearMovementBehavior, LifetimeBehavior, SpellBehavior
 from .core import SpellDefinition, SpellStats
@@ -20,6 +20,7 @@ class BaseSpell:
         visual_factory: Callable[[], SpellVisual],
         behavior_factory: Optional[Callable[[], list[SpellBehavior]]] = None,
         friendly_fire: bool = False,
+        voice_triggers: Optional[Sequence[str]] = None,
     ) -> None:
         """Store factories and defaults that drive derived spell definitions."""
 
@@ -30,6 +31,7 @@ class BaseSpell:
         self._visual_factory = visual_factory
         self._behavior_factory = behavior_factory
         self._friendly_fire = friendly_fire
+        self._voice_triggers = tuple(voice_triggers or ())
 
     def _build_behaviors(self) -> list[SpellBehavior]:
         """Construct default behaviors when no custom factory is provided."""
@@ -53,4 +55,5 @@ class BaseSpell:
             behavior_factory=lambda: self._build_behaviors(),
             effect_factory=self._effect_factory,
             visual_factory=self._visual_factory,
+            voice_triggers=self._voice_triggers,
         )

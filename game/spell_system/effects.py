@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pygame
 
-from player import Player
 from .status_effects import BurningStatus, SlowStatus, FrozenStatus
-
 from .core import Spell
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from player import Player
 
 
 class SpellEffect:

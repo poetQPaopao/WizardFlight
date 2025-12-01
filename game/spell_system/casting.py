@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Sequence, TYPE_CHECKING
 
 import pygame
 
-from player import Player
-
 from .core import Spell, SpellDefinition
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from player import Player
 
 class SpellCaster:
     """Handles cooldowns and input for multiple equipped spells."""
@@ -17,6 +18,7 @@ class SpellCaster:
         self.definitions = list(definitions)
         self.cooldowns: dict[str, float] = {d.name: 0.0 for d in definitions}
         self._was_pressed = False
+        self._voice_lookup = self._build_voice_lookup()
 
     @property
     def definition(self) -> SpellDefinition:
@@ -51,8 +53,9 @@ class SpellCaster:
         
         # Otherwise, check for button press (primary spell)
         elif pressed and not self._was_pressed:
-            if self.definition:
-                cast = self._attempt_cast(player, manager, self.definition.name)
+            manual_spell = self._selected_spell_for_player(player)
+            if manual_spell:
+                cast = self._attempt_cast(player, manager, manual_spell)
         
         self._was_pressed = pressed
         return cast
@@ -89,6 +92,49 @@ class SpellCaster:
         manager.spawn(spell)
         self.cooldowns[spell_name] = definition.stats.cooldown
         return True
+
+    def match_voice_commands(self, transcript: str) -> list[str]:
+        """Return spell names mentioned in ``transcript`` for this caster."""
+
+        if not transcript or not self._voice_lookup:
+            return []
+        lowered = transcript.lower()
+        matches: list[tuple[int, str, str]] = []
+        for keyword, spell_name in self._voice_lookup.items():
+            index = lowered.find(keyword)
+            if index == -1:
+                continue
+            matches.append((index, keyword, spell_name))
+        if not matches:
+            return []
+        matches.sort(key=lambda item: (item[0], -len(item[1])))
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for _, _, spell_name in matches:
+            if spell_name in seen:
+                continue
+            ordered.append(spell_name)
+            seen.add(spell_name)
+        return ordered
+
+    def _build_voice_lookup(self) -> dict[str, str]:
+        """Map normalized voice triggers to spell names for quick matching."""
+
+        lookup: dict[str, str] = {}
+        for definition in self.definitions:
+            for trigger in getattr(definition, "voice_triggers", ()):
+                if trigger and trigger not in lookup:
+                    lookup[trigger] = definition.name
+        return lookup
+
+    def _selected_spell_for_player(self, player: Player) -> str | None:
+        """Return the player's active spell or fall back to the first slot."""
+
+        if hasattr(player, "current_spell_name"):
+            selected = player.current_spell_name()
+            if selected:
+                return selected
+        return self.definition.name if self.definition else None
 
 
 class SpellManager:
