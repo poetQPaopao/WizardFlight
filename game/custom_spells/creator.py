@@ -4,7 +4,7 @@ import os
 from typing import Optional, Sequence, TYPE_CHECKING
 
 from image_gen import generate_pixel_art_spell_icon
-from spell_system import SpellDefinition, build_custom_spell
+from spell_system import SpellDefinition, build_custom_spell, generate_parameters
 
 if TYPE_CHECKING:  # pragma: no cover - typing helpers
     from player import Player
@@ -71,6 +71,7 @@ class CustomSpellCreator:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         success = generate_pixel_art_spell_icon(description, output_path)
+        spell_parameters = generate_parameters(description)
         if not success:
             print("Failed to generate spell icon. Spell creation aborted.")
             return

@@ -8,6 +8,8 @@ from .core import SpellDefinition, SpellStats
 from .effects import BurnEffect, DamageEffect, KnockbackEffect, SlowEffect
 from .visuals import SimpleOrbVisual, SpriteSpellVisual
 
+from google import genai
+
 
 def build_fire_bolt() -> SpellDefinition:
     """Construct the default Fire Bolt spell definition."""
@@ -91,6 +93,12 @@ def build_custom_spell(
     base = BaseSpell(
         name=name,
         stats=stats,
+        behavior_factory=lambda: [
+            HomingMovmentBehavior(),
+            LifetimeBehavior(),
+            BoundsBehavior(margin=stats.radius),
+            CollisionBehavior(),
+        ],
         effect_factory=lambda: [
             DamageEffect(stats.damage),
             KnockbackEffect(force=150.0),
@@ -100,8 +108,53 @@ def build_custom_spell(
     )
     return base.to_definition()
 
+def generate_parameters(description: str) -> dict[str, float]:
+    """Generate spell parameters based on the description."""
+    # Simple heuristic-based parameter generation
+    description = description.lower()
+    params = {
+        "damage": 20.0,
+        "speed": 400.0,
+        "cost": 20.0,
+        "radius": 40.0,
+        "lifetime": 2.0,
+        "cooldown": 0.5,
+    }
+
+    client = genai.Client(api_key='AIzaSyCorUATvMRJ7VO0aFWJeRj8Jjyk8wqt_Fw')
+
+    content = (f"parameters for fire ball: stats = SpellStats(damage=12.0, speed=360.0, cost=18.0, radius=14.0, lifetime=2.4, cooldown=0.6, max_targets=2). Parameters for ice bolt: stats = SpellStats(damage=12.0, speed=360.0, cost=18.0, radius=14.0, lifetime=2.4, cooldown=0.6, max_targets=2). Generate spell parameters based on the previous format and the following description: {description}")
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=content,
+    )
+
+    print(response.text)
+
+    try:
+        params = parse_generated_parameters(response.text)
+    except Exception:
+        print("Failed to parse generated parameters, using defaults.")
+    return params
+
+def parse_generated_parameters(response_text: str) -> dict[str, float]:
+    """Parse the generated parameters from the response text."""
+    params = {}
+    for line in response_text.splitlines():
+        if '=' in line:
+            key, value = line.split('=', 1)
+            key = key.strip()
+            try:
+                value = float(value.strip())
+                params[key] = value
+            except ValueError:
+                continue
+    return params
+
 
 def default_spellbook() -> list[SpellDefinition]:
     """Return the baseline trio of spells available to every caster."""
 
     return [build_fire_bolt(), build_frost_orb(), build_healing_wave()]
+
+

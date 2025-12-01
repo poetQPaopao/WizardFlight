@@ -18,6 +18,7 @@ from .spellbook import (
     build_fire_bolt,
     build_frost_orb,
     default_spellbook,
+    generate_parameters,
 )
 from .status_effects import StatusEffect, BurningStatus, SlowStatus, FrozenStatus
 from .visuals import SimpleOrbVisual, SpellVisual
@@ -52,4 +53,5 @@ __all__ = [
     "build_fire_bolt",
     "build_frost_orb",
     "default_spellbook",
+    "generate_parameters",
 ]
