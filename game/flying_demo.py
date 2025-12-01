@@ -6,15 +6,13 @@ from typing import Optional, Sequence
 
 import pygame
 from controller import ControlScheme, PoseControlSystem, PoseKeyState, VoiceCommandManager
+from custom_spells import CustomSpellCreator
 from player import Player
 from spell_system import (
     SpellManager,
     default_spellbook,
-    build_custom_spell,
     SpellDefinition,
 )
-from image_gen import generate_pixel_art_spell_icon
-import os
 
 SCREEN_SIZE = (1280, 720)
 BACKGROUND = (18, 18, 28)
@@ -84,7 +82,7 @@ class FlyingDemoGame:
         self._spell_library: dict[str, SpellDefinition] = {
             spell.name: spell for spell in default_spellbook()
         }
-        self._player_spellbooks: list[list[str]] = []
+        self._custom_spell_creator: Optional[CustomSpellCreator] = None
         self._voice_manager = VoiceCommandManager()
         self._initialize_round()
         if use_pose_input:
@@ -154,31 +152,46 @@ class FlyingDemoGame:
 
         self._round_time += dt
 
-        if self._pose_system:
-            self._pose_system.tick()
-            if self._pose_system.quit_requested:
-                self._running = False
-                return
+        if self._handle_pose_input():
+            return
 
         self._voice_manager.process_audio(self.players)
-
-        for idx, player in enumerate(self.players):
-            overrides: dict[int, bool] = {}
-            if self._pose_system:
-                overrides = self._pose_system.build_overrides(idx, player.controls)
-            pressed_for_player: Sequence[bool] = self._pressed
-            if overrides:
-                pressed_for_player = PoseKeyState(overrides, self._pressed)
-            player.update(dt, pressed_for_player)
-            player.update_spellcasting(dt)
-            pressed_cast = bool(pressed_for_player[player.controls.cast])
-
-            cast_via_voice = self._voice_manager.try_cast_for_player(idx, player, self._spell_manager)
-            if not cast_via_voice:
-                player.handle_cast_input(pressed_cast, self._spell_manager)
-
+        self._update_players(dt)
         self._spell_manager.update(dt, self.players)
         self._evaluate_round_outcome()
+
+    def _handle_pose_input(self) -> bool:
+        if not self._pose_system:
+            return False
+
+        self._pose_system.tick()
+        if self._pose_system.quit_requested:
+            self._running = False
+            return True
+        return False
+
+    def _update_players(self, dt: float) -> None:
+        for idx, player in enumerate(self.players):
+            pressed_for_player = self._controls_for_player(idx, player)
+            player.update(dt, pressed_for_player)
+            player.update_spellcasting(dt)
+            self._handle_spellcasting(idx, player, pressed_for_player)
+
+    def _controls_for_player(self, idx: int, player: Player) -> Sequence[bool]:
+        pressed_for_player: Sequence[bool] = self._pressed or []
+        if not self._pose_system:
+            return pressed_for_player
+
+        overrides = self._pose_system.build_overrides(idx, player.controls)
+        if overrides:
+            return PoseKeyState(overrides, self._pressed)
+        return pressed_for_player
+
+    def _handle_spellcasting(self, idx: int, player: Player, pressed_for_player: Sequence[bool]) -> None:
+        pressed_cast = bool(pressed_for_player[player.controls.cast])
+        cast_via_voice = self._voice_manager.try_cast_for_player(idx, player, self._spell_manager)
+        if not cast_via_voice:
+            player.handle_cast_input(pressed_cast, self._spell_manager)
 
     def _render(self) -> None:
         """Draw arena bounds, sprites, spells, UI, and overlays."""
@@ -205,17 +218,29 @@ class FlyingDemoGame:
         """Reset players, controllers, and timers to start a new round."""
 
         first_setup = not self._voice_manager.configured
+        self._reset_round_objects()
+        if first_setup and not self._prepare_voice_setup():
+            return
+        self._voice_manager.reset(len(self.players))
+        self._reset_round_state()
+
+    def _reset_round_objects(self) -> None:
         self.players = self._create_players()
         self._spell_manager = SpellManager(self._world_bounds)
-        if first_setup:
-            if not self._voice_manager.setup_audio_inputs(self.players):
-                self._running = False
-                return
-            if self._running:
-                self._setup_custom_spells()
-            if not self._running:
-                return
-        self._voice_manager.reset(len(self.players))
+
+    def _prepare_voice_setup(self) -> bool:
+        if not self._voice_manager.setup_audio_inputs(self.players):
+            self._running = False
+            return False
+        if self._running:
+            self._custom_spell_creator = CustomSpellCreator(
+                players=self.players,
+                spell_library=self._spell_library,
+            )
+            self._custom_spell_creator.run()
+        return self._running
+
+    def _reset_round_state(self) -> None:
         self._winner_name = None
         self._round_time = 0.0
         self.game_state = GameState.RUNNING
@@ -259,105 +284,6 @@ class FlyingDemoGame:
             label = self._font.render(text, True, (240, 240, 255))
             rect = label.get_rect(center=(center_x, center_y + idx * 28))
             self._screen.blit(label, rect)
-
-    def _setup_custom_spells(self) -> None:
-        """Offer an interactive prompt to build and register custom spells."""
-
-        print("\n--- Custom Spell Creation ---")
-        while True:
-            try:
-                choice = input("Do you want to create a custom spell? (y/n) [default: n]: ").strip().lower()
-                if choice != 'y':
-                    break
-                
-                name = input("Enter spell name (e.g. 'Lightning'): ").strip()
-                if not name:
-                    print("Name cannot be empty.")
-                    continue
-                
-                description = input("Enter visual description for icon generation (e.g. 'yellow lightning bolt'): ").strip()
-                if not description:
-                    print("Description cannot be empty.")
-                    continue
-                voice_text = input(
-                    "Enter comma-separated voice keywords (default uses spell name): "
-                ).strip()
-                voice_triggers = [token.strip() for token in voice_text.split(',') if token.strip()]
-                if not voice_triggers:
-                    voice_triggers = [name]
-                
-                # Generate icon
-                filename = f"{name.lower().replace(' ', '_')}.png"
-                output_path = os.path.join("assets", "custom_spells", filename)
-                
-                success = generate_pixel_art_spell_icon(description, output_path)
-                
-                if success:
-                    # Create spell definition
-                    spell_def = build_custom_spell(name, output_path, voice_triggers=voice_triggers)
-                    self._spell_library[spell_def.name] = spell_def
-                    self._assign_custom_spell_to_players(spell_def)
-                    print(
-                        f"Successfully created spell '{name}'! Voice keywords: {', '.join(voice_triggers)}"
-                    )
-                else:
-                    print("Failed to generate spell icon. Spell creation aborted.")
-                    
-            except KeyboardInterrupt:
-                print("\nSpell creation cancelled.")
-                break
-
-    def _assign_custom_spell_to_players(self, spell_def: SpellDefinition) -> None:
-        """Ask which players should learn ``spell_def`` and update loadouts."""
-
-        if not self.players:
-            return
-        prompt = (
-            "Assign this spell to players by name or number (comma separated, 'all' for everyone) [default: all]: "
-        )
-        selection = input(prompt).strip().lower()
-        if selection in ("", "all"):
-            indices = list(range(len(self.players)))
-        else:
-            indices = self._parse_player_selection(selection)
-            if not indices:
-                print("No valid players selected. Assigning to everyone by default.")
-                indices = list(range(len(self.players)))
-        for idx in indices:
-            if idx >= len(self._player_spellbooks):
-                self._player_spellbooks.append(self._all_spell_names())
-            book = self._player_spellbooks[idx]
-            if spell_def.name not in book:
-                book.append(spell_def.name)
-
-    def _parse_player_selection(self, selection: str) -> list[int]:
-        """Convert a comma-separated selection string to player indices."""
-
-        if not selection:
-            return []
-        lookup = {player.name.lower(): idx for idx, player in enumerate(self.players)}
-        indices: list[int] = []
-        for token in selection.split(','):
-            candidate = token.strip()
-            if not candidate:
-                continue
-            if candidate.isdigit():
-                idx = int(candidate) - 1
-                if 0 <= idx < len(self.players):
-                    indices.append(idx)
-                continue
-            idx = lookup.get(candidate.lower())
-            if idx is not None:
-                indices.append(idx)
-        # Preserve order of appearance but drop duplicates
-        seen: set[int] = set()
-        ordered: list[int] = []
-        for idx in indices:
-            if idx in seen:
-                continue
-            seen.add(idx)
-            ordered.append(idx)
-        return ordered
 
 
 def run(*, use_pose_input: bool = True) -> None:
