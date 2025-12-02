@@ -185,11 +185,6 @@ class VoiceCommandManager:
         if not request:
             return False
 
-        if player.cast_spell_by_name(request.spell_name, spell_manager):
-            print(f"[voice] cast spell: {request.spell_name}")
-            self._remove_request(request)
-            return True
-
         definition = player.get_spell_definition(request.spell_name)
         if not definition:
             self._remove_request(request)
@@ -198,18 +193,25 @@ class VoiceCommandManager:
         reason_message = ""
         cooldown = player.spell_cooldown(definition.name)
         if cooldown > 0:
-            reason_message = f"[voice] waiting for {definition.name} (cooldown {cooldown:.2f}s)"
+            reason_message = f"[voice] cannot cast {definition.name} (cooldown {cooldown:.2f}s)"
         elif not player.can_spend_mana(definition.stats.cost):
             reason_message = (
-                f"[voice] waiting for {definition.name} (mana {player.mana:.1f}/{definition.stats.cost:.1f})"
+                f"[voice] cannot cast {definition.name} (mana {player.mana:.1f}/{definition.stats.cost:.1f})"
             )
 
-        if reason_message and reason_message != request.last_reason:
-            print(reason_message)
-            request.last_reason = reason_message
-        if not reason_message:
-            request.last_reason = ""
+        if reason_message:
+            if reason_message != request.last_reason:
+                print(reason_message)
+                request.last_reason = reason_message
+            self._remove_request(request)
+            return False
 
+        if player.cast_spell_by_name(request.spell_name, spell_manager):
+            print(f"[voice] cast spell: {request.spell_name}")
+            self._remove_request(request)
+            return True
+
+        self._remove_request(request)
         return False
 
     def pending_request_for(self, player_index: int) -> Optional[VoiceSpellRequest]:

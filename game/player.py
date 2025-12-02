@@ -48,7 +48,7 @@ class Player(pygame.sprite.Sprite):
         tilt_response: float = 10.0,
         max_health: float = 120.0,
         max_mana: float = 100.0,
-        mana_regen: float = 25.0,
+        mana_regen: float = 1.0,
         bar_color: Optional[Color] = None,
     ) -> None:
         super().__init__()

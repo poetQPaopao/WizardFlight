@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pygame
 
 from .core import SpellContext
@@ -93,6 +95,88 @@ class TargetMovementBehavior(LinearMovementBehavior):
                     context.spell.velocity = offset.normalize() * context.spell.stats.speed
             self._aimed = True
         super().update(context, dt)
+
+
+class OscillatingMovementBehavior(LinearMovementBehavior):
+    """Add a sinusoidal lateral wobble while moving forward."""
+
+    def __init__(self, *, amplitude: float = 120.0, frequency: float = 2.5) -> None:
+        self.amplitude = max(0.0, amplitude)
+        self.frequency = max(0.0, frequency)
+        self._phase = 0.0
+
+    def update(self, context: SpellContext, dt: float) -> None:
+        if dt > 0 and self.amplitude > 0 and self.frequency > 0:
+            self._phase += dt * self.frequency * math.tau
+            velocity = context.spell.velocity
+            if velocity.length_squared() > 0:
+                lateral = pygame.Vector2(-velocity.y, velocity.x)
+                if lateral.length_squared() > 0:
+                    lateral = lateral.normalize()
+                    offset = math.sin(self._phase) * self.amplitude
+                    context.spell.position += lateral * offset * dt
+        super().update(context, dt)
+
+
+class BoomerangBehavior(LinearMovementBehavior):
+    """Send the spell out, then arc it back toward the caster."""
+
+    def __init__(self, *, return_time: float = 0.6, turn_rate: float = 6.0) -> None:
+        self.return_time = max(0.0, return_time)
+        self.turn_rate = max(0.0, turn_rate)
+        self._returning = False
+
+    def update(self, context: SpellContext, dt: float) -> None:
+        if not self._returning and context.spell.age >= self.return_time:
+            self._returning = True
+        if self._returning:
+            caster_position = pygame.Vector2(context.spell.caster.rect.center)
+            to_caster = caster_position - context.spell.position
+            if to_caster.length_squared() > 0:
+                desired_velocity = to_caster.normalize() * context.spell.stats.speed
+                blend = 1.0 - math.exp(-self.turn_rate * max(0.0, dt))
+                context.spell.velocity = context.spell.velocity.lerp(desired_velocity, blend)
+        super().update(context, dt)
+
+
+class PulsingRadiusBehavior(SpellBehavior):
+    """Continuously scale the spell's radius for area effects."""
+
+    def __init__(self, *, min_scale: float = 0.5, max_scale: float = 1.6, pulse_speed: float = 1.5) -> None:
+        self.min_scale = min(min_scale, max_scale)
+        self.max_scale = max(min_scale, max_scale)
+        self.pulse_speed = max(0.0, pulse_speed)
+
+    def update(self, context: SpellContext, dt: float) -> None:
+        spell = context.spell
+        if self.pulse_speed <= 0:
+            return
+        phase = spell.age * self.pulse_speed * math.tau
+        scale = self.min_scale + (math.sin(phase) * 0.5 + 0.5) * (self.max_scale - self.min_scale)
+        new_radius = max(2.0, spell.stats.radius * scale)
+        if abs(new_radius - spell.radius) <= 0.01:
+            return
+        center = spell.rect.center
+        spell.radius = new_radius
+        diameter = int(new_radius * 2)
+        spell.rect.size = (diameter, diameter)
+        spell.rect.center = center
+
+
+class AnchorToCasterBehavior(SpellBehavior):
+    """Lock the spell to the caster (optionally offset in the aim direction)."""
+
+    def __init__(self, *, forward_offset: float = 0.0) -> None:
+        self.forward_offset = forward_offset
+
+    def update(self, context: SpellContext, dt: float) -> None:
+        caster = context.spell.caster
+        position = pygame.Vector2(caster.rect.center)
+        if self.forward_offset != 0 and hasattr(caster, "aim_direction"):
+            direction = caster.aim_direction()
+            position += direction * self.forward_offset
+        context.spell.position = position
+        context.spell.sync_geometry()
 
 
 class LifetimeBehavior(SpellBehavior):

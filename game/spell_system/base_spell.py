@@ -24,7 +24,7 @@ class BaseSpell:
     ) -> None:
         """Store factories and defaults that drive derived spell definitions."""
 
-        stats.max_targets = 1
+        stats.max_hits = 1
         self.name = name
         self.stats = stats
         self._effect_factory = effect_factory

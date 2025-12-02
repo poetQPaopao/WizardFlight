@@ -22,7 +22,7 @@ class SpellStats:
     radius: float
     lifetime: float
     cooldown: float
-    max_targets: int = 1
+    max_hits: int = 1
 
 
 @dataclass(slots=True)
@@ -116,7 +116,7 @@ class Spell:
             effect.apply(self, target)
         self._hit_targets.add(target)
         self.targets_hit += 1
-        if self.targets_hit >= self.stats.max_targets:
+        if self.targets_hit >= self.stats.max_hits:
             self.kill()
 
 
