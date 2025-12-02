@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Optional, Sequence, TYPE_CHECKING
 
 from .audio_input import (
+    AudioController,
     MicrophoneConfigurationCancelled,
-    MultiMicAudioController,
     interactive_configure_microphones,
 )
 
@@ -27,12 +27,14 @@ class VoiceCommandManager:
     """Owns microphone setup, transcript parsing, and queued spell casts."""
 
     def __init__(self) -> None:
-        self._player_sources: dict[int, str] = {}
-        self._source_to_player: dict[str, int] = {}
+        self._player_sources: dict[int, int] = {}
+        self._source_to_player: dict[int, int] = {}
+        self._source_labels: dict[int, str] = {}
         self._pending_requests: list[VoiceSpellRequest] = []
-        self._voice_last_errors: dict[str, str] = {}
+        self._voice_last_errors: dict[int, str] = {}
         self._voice_processed_seq: dict[int, int] = {}
-        self._audio_controller: Optional[MultiMicAudioController] = None
+        self._shared_source_index: Optional[int] = None
+        self._audio_controller: Optional[AudioController] = None
 
     @property
     def configured(self) -> bool:
@@ -49,16 +51,28 @@ class VoiceCommandManager:
         except MicrophoneConfigurationCancelled:
             print("\n[voice] Microphone configuration cancelled. Exiting game.")
             return False
+        if not configs:
+            print("\n[voice] No microphones selected; voice control disabled.")
+            return False
 
         self._player_sources.clear()
         self._source_to_player.clear()
-        for config in configs:
-            player_idx = next((i for i, player in enumerate(players) if player.name == config.source), None)
-            if player_idx is not None:
-                self._player_sources[player_idx] = config.source
-                self._source_to_player[config.source] = player_idx
+        self._source_labels = {config.source_index: (config.label or f"source-{config.source_index}") for config in configs}
+        self._shared_source_index = configs[0].source_index if len(configs) == 1 else None
 
-        self._audio_controller = MultiMicAudioController(configs)
+        if self._shared_source_index is not None:
+            for idx in range(len(players)):
+                self._player_sources[idx] = self._shared_source_index
+        else:
+            for config in configs:
+                player_idx: Optional[int] = config.source_index if 0 <= config.source_index < len(players) else None
+                if player_idx is None and config.label:
+                    player_idx = next((i for i, player in enumerate(players) if player.name == config.label), None)
+                if player_idx is not None:
+                    self._player_sources[player_idx] = config.source_index
+                    self._source_to_player[config.source_index] = player_idx
+
+        self._audio_controller = AudioController(configs)
         return True
 
     def shutdown(self) -> None:
@@ -85,45 +99,79 @@ class VoiceCommandManager:
             return
 
         controller_errors = self._audio_controller.errors()
-        seen_sources = set()
-        for source, message in controller_errors:
-            seen_sources.add(source)
-            last = self._voice_last_errors.get(source)
+        seen_sources: set[int] = set()
+        for source_index, source_label, message in controller_errors:
+            seen_sources.add(source_index)
+            last = self._voice_last_errors.get(source_index)
             if message != last:
-                print(f"[voice:{source}] error: {message}")
-                self._voice_last_errors[source] = message
-        for source in list(self._voice_last_errors):
-            if source not in seen_sources:
-                del self._voice_last_errors[source]
+                label = source_label or self._source_labels.get(source_index, f"source-{source_index}")
+                print(f"[voice:{label}] error: {message}")
+                self._voice_last_errors[source_index] = message
+        for source_index in list(self._voice_last_errors):
+            if source_index not in seen_sources:
+                del self._voice_last_errors[source_index]
 
         for event in self._audio_controller.consume_final_events():
-            player_idx = self._source_to_player.get(event.source)
-            if player_idx is None or player_idx >= len(players):
-                continue
+            self._handle_transcript_event(event, players)
 
-            if player_idx not in self._voice_processed_seq:
-                self._voice_processed_seq[player_idx] = -1
-            if event.sequence <= self._voice_processed_seq[player_idx]:
-                continue
+    def _handle_transcript_event(self, event: "TranscriptEvent", players: Sequence["Player"]) -> None:
+        if not event.text:
+            return
+        self._route_transcript_to_players(
+            event.source_index,
+            event.text.strip(),
+            event.sequence,
+            players,
+            event.source,
+        )
 
-            transcript = event.text.strip()
-            if not transcript:
-                continue
+    def _route_transcript_to_players(
+        self,
+        source_index: int,
+        transcript: str,
+        sequence: int,
+        players: Sequence["Player"],
+        source_label: str,
+    ) -> None:
+        label = source_label or self._source_labels.get(source_index, f"source-{source_index}")
+        if self._shared_source_index is not None and source_index == self._shared_source_index:
+            for idx, player in enumerate(players):
+                self._process_transcript_for_player(idx, player, transcript, label, sequence, players)
+            return
 
-            player = players[player_idx]
-            found_spells = player.match_voice_commands(transcript)
-            if not found_spells:
-                self._voice_processed_seq[player_idx] = event.sequence
-                continue
+        player_idx = self._source_to_player.get(source_index)
+        if player_idx is None or player_idx >= len(players):
+            return
 
-            print(f"[voice:{event.source}] new commands: {found_spells} (from '{transcript}')")
-            self._enqueue_voice_spells(
-                found_spells,
-                player_idx,
-                event.source,
-                players,
-            )
-            self._voice_processed_seq[player_idx] = event.sequence
+        self._process_transcript_for_player(player_idx, players[player_idx], transcript, label, sequence, players)
+
+    def _process_transcript_for_player(
+        self,
+        player_idx: int,
+        player: "Player",
+        transcript: str,
+        source: str,
+        sequence: int,
+        players: Sequence["Player"],
+    ) -> None:
+        if player_idx not in self._voice_processed_seq:
+            self._voice_processed_seq[player_idx] = -1
+        if sequence <= self._voice_processed_seq[player_idx]:
+            return
+
+        found_spells = player.match_voice_commands(transcript)
+        if not found_spells:
+            self._voice_processed_seq[player_idx] = sequence
+            return
+
+        print(f"[voice:{source}] new commands: {found_spells} (from '{transcript}')")
+        self._enqueue_voice_spells(
+            found_spells,
+            player_idx,
+            source,
+            players,
+        )
+        self._voice_processed_seq[player_idx] = sequence
 
     def try_cast_for_player(
         self,

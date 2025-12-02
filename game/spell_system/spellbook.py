@@ -107,12 +107,6 @@ def build_custom_spell(
             BoundsBehavior(margin=stats.radius),
             CollisionBehavior(),
         ],
-        behavior_factory=lambda: [
-            HomingMovmentBehavior(),
-            LifetimeBehavior(),
-            BoundsBehavior(margin=stats.radius),
-            CollisionBehavior(),
-        ],
         effect_factory=lambda: [
             DamageEffect(stats.damage),
             KnockbackEffect(force=150.0),

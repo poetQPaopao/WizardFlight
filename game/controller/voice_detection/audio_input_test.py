@@ -4,13 +4,13 @@ Run this file to stream audio, view partial/final transcripts, and inspect
 device/channel settings without launching the whole game:
 
     python -m controller.voice_detection.audio_input_test --list-devices
-    python -m controller.voice_detection.audio_input_test --device-index 1 --sample-rate 48000
-    python -m controller.voice_detection.audio_input_test --channel-mapping 1,2
+    python -m controller.voice_detection.audio_input_test --sample-rate 48000
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import sys
 import time
 from pathlib import Path
@@ -28,24 +28,19 @@ _bootstrap_path()
 
 try:
     from controller.voice_detection import audio_input
+    from controller.voice_detection.audio_input import (
+        AudioInputConfig,
+        MicrophoneConfigurationCancelled,
+        interactive_configure_microphones,
+    )
 except ImportError as exc:  # pragma: no cover - convenience for manual runs
     sys.exit(
         "Failed to import audio_input. Run from the project root or install dependencies "
         f"from requirements.txt. Details: {exc}"
     )
 
-
-def _parse_channel_mapping(raw: str | None) -> list[int] | None:
-    if not raw:
-        return None
-    try:
-        return [int(part) for part in raw.split(",") if part.strip()]
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"Invalid channel mapping '{raw}'") from exc
-
-
 def _print_devices() -> None:
-    devices = audio_input.MultiMicAudioController.list_input_devices()
+    devices = audio_input.AudioController.list_input_devices()
     if not devices:
         print("No input devices detected by sounddevice/PyAudio.")
         return
@@ -54,56 +49,80 @@ def _print_devices() -> None:
         print(f"  [{idx}] {name}")
 
 
-def _start_listener(args: argparse.Namespace):
-    mapping = _parse_channel_mapping(args.channel_mapping)
-    listener = audio_input.AudioListener(
-        sample_rate=args.sample_rate,
-        device_index=args.device_index,
-        channel_mapping=mapping,
-        source_name=args.source_name,
-        api_key=args.api_key,
+def _start_controller_from_configs(configs: list[AudioInputConfig], args: argparse.Namespace):
+    if args.sample_rate:
+        configs = [dataclasses.replace(cfg, sample_rate=args.sample_rate) for cfg in configs]
+    controller = audio_input.AudioController(configs)
+    labels = ", ".join([cfg.label or f"source-{cfg.source_index}" for cfg in configs])
+    print(f"[voice] starting controller for: {labels}")
+    return controller
+
+
+def _start_controller(args: argparse.Namespace):
+    try:
+        configs = interactive_configure_microphones(["Mic A", "Mic B"])
+    except MicrophoneConfigurationCancelled:
+        print("\n[voice] Microphone selection cancelled; exiting.")
+        return None
+    if not configs:
+        print("\n[voice] No microphones selected; exiting.")
+        return None
+
+    controller = _start_controller_from_configs(configs, args)
+    desc_label = ", ".join([cfg.label or f"source-{cfg.source_index}" for cfg in configs])
+    device_desc = ", ".join(
+        [
+            f"device={cfg.device_index or 'default'}"
+            + (f" channels={cfg.channel_mapping}" if cfg.channel_mapping else "")
+            for cfg in configs
+        ]
     )
-    print(
-        f"[voice:{listener.source}] starting stream (rate={listener.sample_rate}, "
-        f"device={listener.device_index}, mapping={mapping or 'mono'})"
-    )
-    listener.start()
-    return listener
+    print(f"[voice:{desc_label}] starting stream(s): {device_desc or 'defaults'}")
+    return controller
 
 
 def _run_listener(args: argparse.Namespace) -> int:
     try:
-        listener = _start_listener(args)
+        controller = _start_controller(args)
+        if controller is None:
+            return 1
     except Exception as exc:
         print(f"Failed to start listener: {exc}")
         return 1
 
-    last_final_seq = -1
-    print("Speak into the microphone. Partial and final transcripts will appear below (Ctrl+C to stop).")
+    last_final_seq: dict[int, int] = {}
+    print("Speak into the microphone. Final transcripts will appear below (Ctrl+C to stop).")
     try:
         while True:
-            if listener.error:
-                print(f"[error:{listener.source}] {listener.error}")
+            controller_errors = controller.errors()
+            if controller_errors:
+                for source_index, source_label, message in controller_errors:
+                    print(f"[error:{source_label or source_index}] {message}")
                 break
 
-            event = listener.consume_final_event()
-            if event:
-                last_final_seq = event.sequence
+            events = controller.consume_final_events()
+            for event in events:
+                last_final_seq[event.source_index] = event.sequence
                 print(f"[final #{event.sequence} {event.source}] {event.text}")
 
-            snapshot = listener.snapshot()
-            if snapshot.stage == "final" and snapshot.text and snapshot.sequence != last_final_seq:
-                last_final_seq = snapshot.sequence
+            snapshots = controller.snapshots()
+            for snapshot in snapshots:
+                if (
+                    snapshot.stage == "final"
+                    and snapshot.text
+                    and last_final_seq.get(snapshot.source_index) != snapshot.sequence
+                ):
+                    last_final_seq[snapshot.source_index] = snapshot.sequence
 
-            if not listener.running:
-                print("[voice] listener stopped unexpectedly.")
+            if not controller.running:
+                print("[voice] controller stopped unexpectedly.")
                 break
 
             time.sleep(args.poll_interval)
     except KeyboardInterrupt:
         print("\nStopping listener…")
     finally:
-        listener.stop()
+        controller.stop()
 
     return 0
 
@@ -111,15 +130,7 @@ def _run_listener(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Stream microphone audio and view AssemblyAI transcripts.")
     parser.add_argument("--list-devices", action="store_true", help="List available input devices and exit.")
-    parser.add_argument("--device-index", type=int, default=None, help="PyAudio/sounddevice input index.")
     parser.add_argument("--sample-rate", type=int, default=48000, help="Sampling rate for the stream.")
-    parser.add_argument(
-        "--channel-mapping",
-        type=str,
-        default=None,
-        help="Comma-separated channel numbers to capture (e.g., '1' for left, '1,2' for stereo).",
-    )
-    parser.add_argument("--source-name", type=str, default="mic-test", help="Label used in printed output.")
     parser.add_argument("--poll-interval", type=float, default=0.05, help="Seconds between transcript polls.")
     parser.add_argument(
         "--api-key",
