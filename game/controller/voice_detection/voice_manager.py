@@ -32,7 +32,7 @@ class VoiceCommandManager:
         self._source_labels: dict[int, str] = {}
         self._pending_requests: list[VoiceSpellRequest] = []
         self._voice_last_errors: dict[int, str] = {}
-        self._voice_processed_seq: dict[int, int] = {}
+        self._live_word_cache: dict[int, tuple[int, list[str], str, list[str]]] = {}
         self._shared_source_index: Optional[int] = None
         self._audio_controller: Optional[AudioController] = None
 
@@ -86,14 +86,14 @@ class VoiceCommandManager:
         """Clear queued voice requests and transcript bookkeeping."""
 
         self._pending_requests.clear()
-        self._voice_processed_seq = {idx: -1 for idx in range(player_count)}
         self._voice_last_errors.clear()
+        self._live_word_cache.clear()
 
     def process_audio(
         self,
         players: Sequence["Player"],
     ) -> None:
-        """Consume final transcripts and enqueue new spell commands."""
+        """Consume live transcripts and enqueue spell commands as words arrive."""
 
         if not self._audio_controller:
             return
@@ -111,59 +111,73 @@ class VoiceCommandManager:
             if source_index not in seen_sources:
                 del self._voice_last_errors[source_index]
 
-        for event in self._audio_controller.consume_final_events():
-            self._handle_transcript_event(event, players)
+        for snapshot in self._audio_controller.snapshots():
+            self._handle_snapshot(snapshot, players)
 
-    def _handle_transcript_event(self, event: "TranscriptEvent", players: Sequence["Player"]) -> None:
-        if not event.text:
+    def _handle_snapshot(self, snapshot: "TranscriptEvent", players: Sequence["Player"]) -> None:
+        state = self._snapshot_word_state(snapshot)
+        if not state:
             return
-        self._route_transcript_to_players(
-            event.source_index,
-            event.text.strip(),
-            event.sequence,
-            players,
-            event.source,
-        )
 
-    def _route_transcript_to_players(
-        self,
-        source_index: int,
-        transcript: str,
-        sequence: int,
-        players: Sequence["Player"],
-        source_label: str,
-    ) -> None:
-        label = source_label or self._source_labels.get(source_index, f"source-{source_index}")
-        if self._shared_source_index is not None and source_index == self._shared_source_index:
+        words, norm_words, new_start = state
+        if new_start >= len(words):
+            return
+
+        label = snapshot.source or self._source_labels.get(snapshot.source_index, f"source-{snapshot.source_index}")
+        if self._shared_source_index is not None and snapshot.source_index == self._shared_source_index:
             for idx, player in enumerate(players):
-                self._process_transcript_for_player(idx, player, transcript, label, sequence, players)
+                self._process_live_transcript(idx, player, words, norm_words, new_start, label, players)
             return
 
-        player_idx = self._source_to_player.get(source_index)
+        player_idx = self._source_to_player.get(snapshot.source_index)
         if player_idx is None or player_idx >= len(players):
             return
 
-        self._process_transcript_for_player(player_idx, players[player_idx], transcript, label, sequence, players)
+        self._process_live_transcript(player_idx, players[player_idx], words, norm_words, new_start, label, players)
 
-    def _process_transcript_for_player(
+    def _snapshot_word_state(
+        self, snapshot: "TranscriptEvent"
+    ) -> Optional[tuple[list[str], list[str], int]]:
+        """Return words, normalized words, and prefix length shared with previous snapshot."""
+
+        if not snapshot.text:
+            return None
+
+        words = snapshot.text.split()
+        norm_words = [w.strip(".,!?;:\"'`").lower() for w in words]
+        prev_seq, prev_words, prev_stage, prev_norm = self._live_word_cache.get(snapshot.source_index, (-1, [], "", []))
+
+        if (
+            snapshot.sequence < prev_seq
+            or len(words) < len(prev_words)
+            or (prev_stage == "final" and snapshot.stage == "partial")
+        ):
+            prev_norm = []
+
+        common_prefix = 0
+        while common_prefix < len(prev_norm) and common_prefix < len(norm_words):
+            if prev_norm[common_prefix] != norm_words[common_prefix]:
+                break
+            common_prefix += 1
+
+        self._live_word_cache[snapshot.source_index] = (snapshot.sequence, words, snapshot.stage, norm_words)
+        return words, norm_words, common_prefix
+
+    def _process_live_transcript(
         self,
         player_idx: int,
         player: "Player",
-        transcript: str,
+        words: list[str],
+        norm_words: list[str],
+        new_start: int,
         source: str,
-        sequence: int,
         players: Sequence["Player"],
     ) -> None:
-        if player_idx not in self._voice_processed_seq:
-            self._voice_processed_seq[player_idx] = -1
-        if sequence <= self._voice_processed_seq[player_idx]:
-            return
-
-        found_spells = player.match_voice_commands(transcript)
+        found_spells = self._match_live_voice_commands(norm_words, new_start, player)
         if not found_spells:
-            self._voice_processed_seq[player_idx] = sequence
             return
 
+        transcript = " ".join(words).strip()
         print(f"[voice:{source}] new commands: {found_spells} (from '{transcript}')")
         self._enqueue_voice_spells(
             found_spells,
@@ -171,7 +185,39 @@ class VoiceCommandManager:
             source,
             players,
         )
-        self._voice_processed_seq[player_idx] = sequence
+
+    def _match_live_voice_commands(
+        self,
+        norm_words: list[str],
+        new_start: int,
+        player: "Player",
+    ) -> list[str]:
+        """Return spells whose voice triggers overlap the newly added words."""
+
+        caster = getattr(player, "spellcaster", None)
+        if not caster:
+            return []
+
+        matches: list[str] = []
+        seen: set[str] = set()
+        for definition in getattr(caster, "definitions", []):
+            triggers = getattr(definition, "voice_triggers", ()) or ()
+            for trigger in triggers:
+                tokens = [token for token in trigger.lower().split() if token]
+                if not tokens:
+                    continue
+                span = len(tokens)
+                for idx in range(0, len(norm_words) - span + 1):
+                    if norm_words[idx : idx + span] != tokens:
+                        continue
+                    if idx + span <= new_start:
+                        continue  # match does not include any newly added words
+                    if definition.name in seen:
+                        break
+                    matches.append(definition.name)
+                    seen.add(definition.name)
+                    break
+        return matches
 
     def try_cast_for_player(
         self,
