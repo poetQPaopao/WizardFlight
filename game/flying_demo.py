@@ -40,6 +40,7 @@ class FlyingDemoGame:
         pygame.display.set_caption("Flying Player Demo")
         self._clock = pygame.time.Clock()
         self._font = pygame.font.SysFont("Inter", 20)
+        self._title_font = pygame.font.SysFont("Inter", 64, bold=True)
         self._world_bounds = self._screen.get_rect().inflate(-BOUNDS_PADDING * 2, -BOUNDS_PADDING * 2)
         self.players: list[Player] = []
         self._spell_manager: SpellManager = SpellManager(self._world_bounds)
@@ -197,6 +198,7 @@ class FlyingDemoGame:
             spell_manager=self._spell_manager,
             players=self.players,
             font=self._font,
+            title_font=self._title_font,
             game_over=self.game_state == GameState.GAME_OVER,
             winner_name=self._winner_name,
             background=self._background,
