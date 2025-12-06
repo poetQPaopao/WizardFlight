@@ -68,6 +68,7 @@ class Player(pygame.sprite.Sprite):
         self._float_phase = 0.0
         self._tilt_angle = 0.0
         self._bob_offset = 0.0
+        self._facing_left = False
         self._aim_direction = pygame.Vector2(1, 0)
         self._speed_multiplier = 1.0
         self._status_effects: list[StatusEffect] = []
@@ -85,7 +86,9 @@ class Player(pygame.sprite.Sprite):
         self._spellbook: list[SpellDefinition] = []
         self.spellcaster: Optional[SpellCaster] = None
 
-        self._base_image = self._build_initial_sprite(sprite, size, color)
+        base_sprite = self._build_initial_sprite(sprite, size, color)
+        self._set_sprite_variants(base_sprite)
+        self._update_base_image_orientation()
         self.image = self._base_image
         self.rect = self.image.get_rect(center=position)
         self._position = pygame.Vector2(self.rect.center)
@@ -125,7 +128,18 @@ class Player(pygame.sprite.Sprite):
         new_sprite = self._convert_surface(sprite)
         if keep_size:
             new_sprite = pygame.transform.smoothscale(new_sprite, self.rect.size)
-        self._base_image = new_sprite
+        self._set_sprite_variants(new_sprite)
+        self._update_base_image_orientation()
+        self._apply_visual_state(self._bob_offset)
+
+    def set_facing_left(self, facing_left: bool) -> None:
+        """Flip the sprite horizontally when facing direction changes."""
+
+        if self._facing_left == facing_left:
+            return
+        self._facing_left = facing_left
+        self._aim_direction = pygame.Vector2(-1, 0) if facing_left else pygame.Vector2(1, 0)
+        self._update_base_image_orientation()
         self._apply_visual_state(self._bob_offset)
 
     @staticmethod
@@ -156,7 +170,6 @@ class Player(pygame.sprite.Sprite):
 
         if direction.length_squared() > 0:
             direction = direction.normalize()
-            self._aim_direction = direction
         speed = self.speed * self._speed_multiplier
         self._velocity = direction * speed
 
@@ -225,6 +238,17 @@ class Player(pygame.sprite.Sprite):
         self.image = image
         self.rect = rect
 
+    def _set_sprite_variants(self, sprite: pygame.Surface) -> None:
+        """Cache left/right facing versions of the current sprite."""
+
+        self._sprite_right = sprite
+        self._sprite_left = pygame.transform.flip(sprite, True, False)
+
+    def _update_base_image_orientation(self) -> None:
+        """Select the sprite based on current facing direction."""
+
+        self._base_image = self._sprite_left if self._facing_left else self._sprite_right
+
     def apply_damage(self, amount: float) -> None:
         """Reduce health by ``amount`` and trigger kill when depleted."""
 
@@ -285,14 +309,9 @@ class Player(pygame.sprite.Sprite):
         return True
 
     def aim_direction(self) -> pygame.Vector2:
-        """Return the normalized facing direction, defaulting forward."""
+        """Return the normalized facing direction, independent of movement."""
 
-        direction = self._aim_direction.copy()
-        if direction.length_squared() == 0:
-            direction = pygame.Vector2(1, 0)
-        else:
-            direction = direction.normalize()
-        return direction
+        return pygame.Vector2(-1, 0) if self._facing_left else pygame.Vector2(1, 0)
 
     def spell_origin(self) -> pygame.Vector2:
         """Return the point in front of the player where spells spawn."""

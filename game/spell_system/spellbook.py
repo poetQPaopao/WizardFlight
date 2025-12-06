@@ -3,17 +3,7 @@ from __future__ import annotations
 from typing import Sequence
 
 from .base_spell import BaseSpell
-from .behaviors import (
-    AnchorToCasterBehavior,
-    BoomerangBehavior,
-    BoundsBehavior,
-    CollisionBehavior,
-    HomingMovmentBehavior,
-    LifetimeBehavior,
-    OscillatingMovementBehavior,
-    PulsingRadiusBehavior,
-    TargetMovementBehavior,
-)
+from .behaviors import *
 from .core import SpellDefinition, SpellStats
 from .effects import BurnEffect, DamageEffect, KnockbackEffect, SlowEffect
 from .visuals import (
@@ -35,7 +25,7 @@ def build_fire_bolt() -> SpellDefinition:
         name="Fire Bolt",
         stats=stats,
         behavior_factory=lambda: [
-            TargetMovementBehavior(),
+            LinearMovementBehavior(),
             LifetimeBehavior(),
             BoundsBehavior(margin=stats.radius),
             CollisionBehavior(),

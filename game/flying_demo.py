@@ -5,6 +5,7 @@ from enum import Enum, auto
 from typing import Optional, Sequence
 
 import pygame
+from background import ParallaxBackground
 from controller import ControlScheme, PoseControlSystem, PoseKeyState, VoiceCommandManager
 from custom_spells import CustomSpellCreator
 from player import Player
@@ -17,7 +18,8 @@ from ui import render_frame
 
 SCREEN_SIZE = (1280, 720)
 FPS = 60
-BOUNDS_PADDING = 32
+BOUNDS_PADDING = 8
+PLAYER_SPRITE_SIZE = (64, 64)
 
 
 class GameState(Enum):
@@ -41,6 +43,7 @@ class FlyingDemoGame:
         self._world_bounds = self._screen.get_rect().inflate(-BOUNDS_PADDING * 2, -BOUNDS_PADDING * 2)
         self.players: list[Player] = []
         self._spell_manager: SpellManager = SpellManager(self._world_bounds)
+        self._background = ParallaxBackground(SCREEN_SIZE)
         self._pose_system: Optional[PoseControlSystem] = None
         self._running = True
         self._pressed: Optional[Sequence[bool]] = None
@@ -58,6 +61,13 @@ class FlyingDemoGame:
             if hasattr(self._pose_system, "reset"):
                 self._pose_system.reset()
 
+    @staticmethod
+    def _load_player_sprite(path: str) -> pygame.Surface:
+        """Load and scale player sprites down to the desired on-screen size."""
+
+        sprite = pygame.image.load(path).convert_alpha()
+        return pygame.transform.scale(sprite, PLAYER_SPRITE_SIZE)
+
     def _create_players(self) -> list[Player]:
         """Instantiate the default keyboard-controlled player roster."""
 
@@ -69,6 +79,7 @@ class FlyingDemoGame:
                 spellbook=default_spellbook(),
                 color=(90, 200, 255),
                 bounds=self._world_bounds,
+                sprite=self._load_player_sprite("assets/wizard1.png"),
             ),
             Player(
                 name="Player 2",
@@ -77,6 +88,7 @@ class FlyingDemoGame:
                 spellbook=default_spellbook(),
                 color=(255, 180, 95),
                 bounds=self._world_bounds,
+                sprite=self._load_player_sprite("assets/wizard2.png"),
             ),
         ]
 
@@ -115,6 +127,7 @@ class FlyingDemoGame:
     def _update(self, dt: float) -> None:
         """Advance controllers, players, spells, and voice casting."""
 
+        self._background.update(dt)
         if self._pressed is None or self.game_state != GameState.RUNNING:
             return
 
@@ -125,6 +138,7 @@ class FlyingDemoGame:
 
         self._voice_manager.process_audio(self.players)
         self._update_players(dt)
+        self._update_player_facing()
         self._spell_manager.update(dt, self.players)
         self._evaluate_round_outcome()
 
@@ -144,6 +158,19 @@ class FlyingDemoGame:
             player.update(dt, pressed_for_player)
             player.update_spellcasting(dt)
             self._handle_spellcasting(idx, player, pressed_for_player)
+
+    def _update_player_facing(self) -> None:
+        """Flip sprites so players face each other based on x-position."""
+
+        if len(self.players) < 2:
+            return
+        p1, p2 = self.players[0], self.players[1]
+        if p1.rect.centerx > p2.rect.centerx:
+            p1.set_facing_left(True)
+            p2.set_facing_left(False)
+        elif p1.rect.centerx < p2.rect.centerx:
+            p1.set_facing_left(False)
+            p2.set_facing_left(True)
 
     def _controls_for_player(self, idx: int, player: Player) -> Sequence[bool]:
         pressed_for_player: Sequence[bool] = self._pressed or []
@@ -172,6 +199,7 @@ class FlyingDemoGame:
             font=self._font,
             game_over=self.game_state == GameState.GAME_OVER,
             winner_name=self._winner_name,
+            background=self._background,
         )
 
     def _shutdown(self) -> None:

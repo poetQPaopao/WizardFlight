@@ -8,6 +8,7 @@ from player import Player
 
 if TYPE_CHECKING:  # pragma: no cover - runtime import not required
     from spell_system import SpellManager
+    from background import ParallaxBackground
 
 BACKGROUND = (18, 18, 28)
 
@@ -21,10 +22,14 @@ def render_frame(
     font: pygame.font.Font,
     game_over: bool,
     winner_name: Optional[str],
+    background: Optional["ParallaxBackground"] = None,
 ) -> None:
     """Draw arena bounds, sprites, spells, HUD, and overlays."""
 
-    screen.fill(BACKGROUND)
+    if background:
+        background.draw(screen)
+    else:
+        screen.fill(BACKGROUND)
     pygame.draw.rect(screen, (40, 40, 70), world_bounds, width=2, border_radius=8)
     spell_manager.draw(screen)
     for player in players:
