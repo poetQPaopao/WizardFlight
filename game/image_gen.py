@@ -5,7 +5,10 @@ import dashscope
 from dashscope import MultiModalConversation
 
 # Use the key from the user's test file
-API_KEY = "sk-6c4a3438dfc34fe887d8e2052b900863"
+API_KEY = os.getenv("DASHSCOPE_API_KEY")
+if not API_KEY:
+    print("[ImageGen] Warning: DASHSCOPE_API_KEY environment variable not set. Image generation may fail.")
+
 dashscope.base_http_api_url = 'https://dashscope.aliyuncs.com/api/v1'
 
 def generate_pixel_art_spell_icon(description: str, output_path: str) -> bool:
