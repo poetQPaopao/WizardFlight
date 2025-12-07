@@ -132,10 +132,6 @@ def draw_cooldowns(surface: pygame.Surface, players: Sequence[Player], font: pyg
                     text_rect = text.get_rect(center=(current_x + icon_size // 2, icons_y + icon_size // 2))
                     surface.blit(text, text_rect)
             
-            # Highlight selected spell
-            if player.current_spell_name() == spell_def.name:
-                pygame.draw.rect(surface, (255, 255, 200), (current_x - 2, icons_y - 2, icon_size + 4, icon_size + 4), 2)
-            
             current_x += icon_size + icon_spacing
 
 
