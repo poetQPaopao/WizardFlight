@@ -5,7 +5,7 @@ import dashscope
 from dashscope import MultiModalConversation
 
 # Use the key from the user's test file
-API_KEY = "sk-f01dd484841f41999c97d9ec6ddb1c7c"
+API_KEY = "sk-6c4a3438dfc34fe887d8e2052b900863"
 dashscope.base_http_api_url = 'https://dashscope.aliyuncs.com/api/v1'
 
 def generate_pixel_art_spell_icon(description: str, output_path: str) -> bool:

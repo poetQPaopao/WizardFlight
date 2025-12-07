@@ -367,10 +367,10 @@ class Player(pygame.sprite.Sprite):
         return tuple(self._spell_loadout)
 
     @property
-    def spellbook(self) -> tuple[SpellDefinition, ...]:
+    def spellbook(self) -> list[SpellDefinition]:
         """Return the equipped spell definitions."""
 
-        return tuple(self._spellbook)
+        return list(self._spellbook)
 
     def knows_spell(self, spell_name: str) -> bool:
         """Return ``True`` if ``spell_name`` exists in the spellbook."""

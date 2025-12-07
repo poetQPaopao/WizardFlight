@@ -15,6 +15,7 @@ from .visuals import (
 )
 
 from google import genai
+import pygame
 
 
 def build_fire_bolt() -> SpellDefinition:
@@ -38,7 +39,9 @@ def build_fire_bolt() -> SpellDefinition:
         visual_factory=lambda: SimpleOrbVisual(color=(255, 100, 23), trail_color=(255, 185, 150)),
         voice_triggers=("fire", "fire bolt", "fireball", "flame"),
     )
-    return base.to_definition()
+    definition = base.to_definition()
+    definition.icon = _create_circle_icon((255, 100, 23))
+    return definition
 
 
 def build_frost_orb() -> SpellDefinition:
@@ -60,6 +63,7 @@ def build_frost_orb() -> SpellDefinition:
         ],
         visual_factory=lambda: SimpleOrbVisual(color=(150, 220, 255), trail_color=(90, 190, 255)),
         voice_triggers=("frost", "frost orb", "freeze", "ice", "ice bolt"),
+        icon=_create_circle_icon((150, 220, 255)),
     )
 
 
@@ -83,6 +87,7 @@ def build_storm_spear() -> SpellDefinition:
         ],
         visual_factory=lambda: LightningBoltVisual(color=(210, 235, 255), glow_color=(120, 170, 255)),
         voice_triggers=("lightning", "storm", "storm spear", "thunder", "zap"),
+        icon=_create_circle_icon((210, 235, 255)),
     )
 
 
@@ -113,6 +118,7 @@ def build_arcane_nova() -> SpellDefinition:
         ],
         visual_factory=lambda: PulsingRingVisual(inner_color=(195, 175, 255), outer_color=(120, 95, 160)),
         voice_triggers=("arcane", "nova", "pulse", "burst"),
+        icon=_create_circle_icon((195, 175, 255)),
     )
 
 
@@ -148,6 +154,7 @@ def build_earth_boomerang() -> SpellDefinition:
             spin_speed=280.0,
         ),
         voice_triggers=("earth", "boomerang", "stone", "return"),
+        icon=_create_circle_icon((185, 155, 105)),
     )
 
 
@@ -174,6 +181,7 @@ def build_healing_wave() -> SpellDefinition:
             outline_color=(40, 120, 40)
         ),
         voice_triggers=("heal", "healing", "healing wave"),
+        icon=_create_circle_icon((100, 255, 100)),
     )
 
 
@@ -211,7 +219,9 @@ def build_custom_spell(
         visual_factory=lambda: SpriteSpellVisual(image_path),
         voice_triggers=voice_triggers or (name,),
     )
-    return base.to_definition()
+    definition = base.to_definition()
+    definition.icon = _load_icon(image_path)
+    return definition
 
 def generate_parameters(description: str) -> dict[str, float]:
     """Generate spell parameters based on the description."""
@@ -268,3 +278,19 @@ def default_spellbook() -> list[SpellDefinition]:
         build_arcane_nova(),
         build_healing_wave(),
     ]
+
+
+def _load_icon(path: str) -> pygame.Surface:
+    try:
+        surf = pygame.image.load(path).convert_alpha()
+        return pygame.transform.smoothscale(surf, (32, 32))
+    except Exception:
+        s = pygame.Surface((32, 32), pygame.SRCALPHA)
+        s.fill((100, 100, 100))
+        return s
+
+
+def _create_circle_icon(color: tuple) -> pygame.Surface:
+    s = pygame.Surface((32, 32), pygame.SRCALPHA)
+    pygame.draw.circle(s, color, (16, 16), 14)
+    return s

@@ -130,6 +130,7 @@ class SpellDefinition:
     effect_factory: Callable[[], list["SpellEffect"]]
     visual_factory: Callable[[], "SpellVisual"]
     voice_triggers: tuple[str, ...] = ()
+    icon: Optional[pygame.Surface] = None
 
     def __post_init__(self) -> None:
         """Normalize voice trigger keywords for consistent matching."""

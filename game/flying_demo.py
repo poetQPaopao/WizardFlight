@@ -25,6 +25,7 @@ PLAYER_SPRITE_SIZE = (64, 64)
 class GameState(Enum):
     """Enumeration describing the possible round states."""
 
+    COUNTDOWN = auto()
     RUNNING = auto()
     GAME_OVER = auto()
 
@@ -129,6 +130,17 @@ class FlyingDemoGame:
         """Advance controllers, players, spells, and voice casting."""
 
         self._background.update(dt)
+
+        if self.game_state == GameState.COUNTDOWN:
+            self._countdown_timer -= dt
+            if self._countdown_timer <= 0:
+                self.game_state = GameState.RUNNING
+                self._fight_label_timer = 1.0
+            return
+
+        if self._fight_label_timer > 0:
+            self._fight_label_timer -= dt
+
         if self._pressed is None or self.game_state != GameState.RUNNING:
             return
 
@@ -202,6 +214,8 @@ class FlyingDemoGame:
             game_over=self.game_state == GameState.GAME_OVER,
             winner_name=self._winner_name,
             background=self._background,
+            countdown_timer=self._countdown_timer if self.game_state == GameState.COUNTDOWN else None,
+            show_fight_label=self._fight_label_timer > 0,
         )
 
     def _shutdown(self) -> None:
@@ -241,7 +255,9 @@ class FlyingDemoGame:
     def _reset_round_state(self) -> None:
         self._winner_name = None
         self._round_time = 0.0
-        self.game_state = GameState.RUNNING
+        self.game_state = GameState.COUNTDOWN
+        self._countdown_timer = 3.0
+        self._fight_label_timer = 0.0
         if self._pose_system and hasattr(self._pose_system, "reset"):
             self._pose_system.reset()
 
