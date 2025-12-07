@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Callable, Sequence, Optional
 
 import pygame
 
@@ -10,6 +11,136 @@ if TYPE_CHECKING:  # pragma: no cover - typing helpers
     from .behaviors import SpellBehavior
     from .effects import SpellEffect
     from .visuals import SpellVisual
+
+
+_sound_cache: dict[Path, pygame.mixer.Sound] = {}
+_variant_cache: dict[tuple[Path, int], list[pygame.mixer.Sound]] = {}
+_mixer_ready: Optional[bool] = None
+
+
+def _resolve_sound_path(raw_path: Path) -> Path | None:
+    """Resolve a sound path relative to CWD or the project root."""
+
+    if raw_path.is_absolute():
+        return raw_path if raw_path.exists() else None
+
+    # Prefer CWD (where assets/ lives when running the game)
+    candidate = Path.cwd() / raw_path
+    if candidate.exists():
+        return candidate
+
+    # Fallback to path relative to the repository root (../.. from this file)
+    repo_root = Path(__file__).resolve().parents[2]
+    candidate = repo_root / raw_path
+    if candidate.exists():
+        return candidate
+    return None
+
+
+def _ensure_mixer_initialized() -> bool:
+    """Initialize pygame.mixer once and cache the result."""
+
+    global _mixer_ready
+    if _mixer_ready is True:
+        return True
+    if _mixer_ready is False:
+        return False
+    try:
+        if not pygame.mixer.get_init():
+            pygame.mixer.init()
+        _mixer_ready = True
+    except Exception as exc:  # pragma: no cover - hardware/env specific
+        print(f"[audio] Unable to initialize mixer: {exc}")
+        _mixer_ready = False
+    return _mixer_ready
+
+
+def _load_sound(path: Path, volume: float) -> pygame.mixer.Sound | None:
+    """Load and cache a sound file at the desired volume."""
+
+    resolved = path.resolve()
+    sound = _sound_cache.get(resolved)
+    if sound is not None:
+        sound.set_volume(volume)
+        return sound
+    try:
+        sound = pygame.mixer.Sound(str(resolved))
+        sound.set_volume(volume)
+        _sound_cache[resolved] = sound
+        return sound
+    except Exception as exc:  # pragma: no cover - file/device issues
+        print(f"[audio] Failed to load sound {resolved}: {exc}")
+        return None
+
+
+def play_sound_effect(path: str | Path | None, volume: float = 1.0) -> None:
+    """Safely play a sound path at the requested volume."""
+
+    if path is None:
+        return
+    resolved = _resolve_sound_path(Path(path))
+    if not resolved or not _ensure_mixer_initialized():
+        return
+    clamped_volume = max(0.0, min(1.0, volume))
+    sound = _load_sound(resolved, clamped_volume)
+    if sound:
+        sound.play()
+
+
+def load_sound_variants(sound_path: str | Path | None, parts: int, base_volume: float = 1.0) -> list[pygame.mixer.Sound]:
+    """Split a sound file into ``parts`` equal segments and return playable clips."""
+
+    if not sound_path or parts <= 0:
+        return []
+    base_volume = max(0.0, min(1.0, base_volume))
+    resolved = _resolve_sound_path(Path(sound_path))
+    if not resolved or not _ensure_mixer_initialized():
+        return []
+
+    key = (resolved, parts)
+    cached = _variant_cache.get(key)
+    if cached:
+        for sound in cached:
+            sound.set_volume(base_volume)
+        return cached
+
+    base_sound = _load_sound(resolved, base_volume)
+    if base_sound is None:
+        return []
+    try:
+        sample_array = pygame.sndarray.array(base_sound)
+    except Exception as exc:  # pragma: no cover - env specific
+        print(f"[audio] Failed to split sound {resolved}: {exc}")
+        return []
+
+    total_samples = sample_array.shape[0]
+    segments = max(1, parts)
+    if total_samples <= segments:
+        _variant_cache[key] = [base_sound]
+        return [base_sound]
+
+    chunk_size = total_samples // segments
+    if chunk_size <= 0:
+        _variant_cache[key] = [base_sound]
+        return [base_sound]
+
+    variants: list[pygame.mixer.Sound] = []
+    for idx in range(segments):
+        start = idx * chunk_size
+        end = total_samples if idx == segments - 1 else (idx + 1) * chunk_size
+        try:
+            sliced = sample_array[start:end].copy()
+            variant = pygame.sndarray.make_sound(sliced)
+            variant.set_volume(base_volume)
+            variants.append(variant)
+        except Exception as exc:  # pragma: no cover - conversion issues
+            print(f"[audio] Failed to build sound slice {idx} from {resolved}: {exc}")
+            break
+
+    if not variants:
+        variants = [base_sound]
+    _variant_cache[key] = variants
+    return variants
 
 
 @dataclass(slots=True)
@@ -131,6 +262,8 @@ class SpellDefinition:
     visual_factory: Callable[[], "SpellVisual"]
     voice_triggers: tuple[str, ...] = ()
     icon: Optional[pygame.Surface] = None
+    sound_path: str | Path | None = None
+    sound_volume: float = 0.8
 
     def __post_init__(self) -> None:
         """Normalize voice trigger keywords for consistent matching."""
@@ -144,6 +277,13 @@ class SpellDefinition:
             triggers.append(cleaned)
             seen.add(cleaned)
         object.__setattr__(self, "voice_triggers", tuple(triggers))
+        volume = max(0.0, min(1.0, self.sound_volume))
+        object.__setattr__(self, "sound_volume", volume)
+
+        resolved_sound = None
+        if self.sound_path:
+            resolved_sound = _resolve_sound_path(Path(self.sound_path))
+        object.__setattr__(self, "sound_path", resolved_sound)
 
     def create_spell(self, caster: Player, position: pygame.Vector2, direction: pygame.Vector2) -> Spell:
         """Instantiate a new ``Spell`` with fresh behaviors/effects/visuals."""
@@ -158,3 +298,8 @@ class SpellDefinition:
             effects=self.effect_factory(),
             visual=self.visual_factory(),
         )
+
+    def play_sound(self) -> None:
+        """Play the configured cast sound, if available."""
+
+        play_sound_effect(self.sound_path, self.sound_volume)

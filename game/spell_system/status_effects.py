@@ -37,33 +37,53 @@ class BurningStatus(StatusEffect):
         player.apply_damage(self.damage_per_second * dt)
 
 
-class SlowStatus(StatusEffect):
-    """Temporarily reduces the player's movement speed."""
-
-    def __init__(self, duration: float, slow_fraction: float) -> None:
-        super().__init__(duration)
-        # Clamp to [0, 0.95] so the player never completely freezes.
-        self.slow_fraction = max(0.0, min(0.95, slow_fraction))
-
-    def apply(self, player: "Player", dt: float) -> None:  # pragma: no cover - dt unused
-        """Halve player speed by applying a multiplicative slow multiplier."""
-
-        del dt
-        multiplier = max(0.01, 1.0 - self.slow_fraction)
-        player.apply_speed_multiplier(multiplier)
-
-
 class FrozenStatus(StatusEffect):
-    """Completely immobilizes the player for the duration."""
+    """Temporarily stops the player from moving."""
 
     def __init__(self, duration: float) -> None:
         super().__init__(duration)
 
     def apply(self, player: "Player", dt: float) -> None:  # pragma: no cover - dt unused
-        """Stop all movement until the effect expires."""
+        """Freeze movement entirely for the remaining duration."""
 
         del dt
         player.apply_speed_multiplier(0.0)
+        player.apply_status_tint((120, 210, 255), intensity=0.85)
+
+
+class ElectrocutedStatus(StatusEffect):
+    """Rapid pulses of immobilization that blink movement on and off."""
+
+    def __init__(self, duration: float, pulse_interval: float = 0.3, stun_ratio: float = 0.65) -> None:
+        """
+        Args:
+            duration: Total time the effect should persist.
+            pulse_interval: Length of a full on/off cycle in seconds.
+            stun_ratio: Fraction of each cycle spent fully immobilized.
+        """
+        super().__init__(duration)
+        self.pulse_interval = max(0.05, pulse_interval)
+        self.stun_ratio = max(0.0, min(1.0, stun_ratio))
+        self._elapsed_in_cycle = 0.0
+
+    def apply(self, player: "Player", dt: float) -> None:
+        """Blink the player's movement: stunned for part of each pulse."""
+
+        if dt < 0:
+            dt = 0.0
+
+        self._elapsed_in_cycle = (self._elapsed_in_cycle + dt) % self.pulse_interval
+        stunned_window = self.pulse_interval * self.stun_ratio
+        stunned = self.stun_ratio > 0 and self._elapsed_in_cycle <= stunned_window
+
+        if stunned:
+            player.apply_speed_multiplier(0.0)
+            tint_intensity = 0.85
+        else:
+            tint_intensity = 0.4
+
+        # Keep a faint tint even while movement is allowed to telegraph the debuff.
+        player.apply_status_tint((250, 225, 90), intensity=tint_intensity)
 
 
 if TYPE_CHECKING:  # pragma: no cover - typing only

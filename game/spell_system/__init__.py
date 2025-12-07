@@ -14,8 +14,8 @@ from .behaviors import (
     HomingMovmentBehavior
 )
 from .casting import SpellCaster, SpellManager
-from .core import Spell, SpellContext, SpellDefinition, SpellStats
-from .effects import BurnEffect, DamageEffect, KnockbackEffect, SlowEffect, SpellEffect
+from .core import Spell, SpellContext, SpellDefinition, SpellStats, play_sound_effect, load_sound_variants
+from .effects import BurnEffect, DamageEffect, KnockbackEffect, FrozenEffect, ElectrocutedEffect, SpellEffect
 from .spellbook import (
     build_custom_spell,
     build_arcane_nova,
@@ -27,7 +27,7 @@ from .spellbook import (
     default_spellbook,
     generate_parameters,
 )
-from .status_effects import StatusEffect, BurningStatus, SlowStatus, FrozenStatus
+from .status_effects import StatusEffect, BurningStatus, FrozenStatus, ElectrocutedStatus
 from .visuals import (
     LightningBoltVisual,
     PulsingRingVisual,
@@ -39,6 +39,8 @@ from .visuals import (
 __all__ = [
     "Spell",
     "SpellStats",
+    "play_sound_effect",
+    "load_sound_variants",
     "SpellContext",
     "SpellDefinition",
     "BaseSpell",
@@ -60,12 +62,13 @@ __all__ = [
     "ShardVisual",
     "DamageEffect",
     "BurnEffect",
-    "SlowEffect",
+    "FrozenEffect",
+    "ElectrocutedEffect",
     "KnockbackEffect",
     "StatusEffect",
     "BurningStatus",
-    "SlowStatus",
     "FrozenStatus",
+    "ElectrocutedStatus",
     "SpellCaster",
     "SpellManager",
     "build_custom_spell",

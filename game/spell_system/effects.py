@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import pygame
 
-from .status_effects import BurningStatus, SlowStatus, FrozenStatus
+from .status_effects import BurningStatus, FrozenStatus, ElectrocutedStatus
 from .core import Spell
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -67,29 +67,30 @@ class BurnEffect(SpellEffect):
         target.add_status(BurningStatus(self.duration, self.dps))
 
 
-class SlowEffect(SpellEffect):
-    def __init__(self, duration: float, slow_fraction: float) -> None:
-        """Store the slow duration and fractional reduction."""
-
-        self.duration = max(0.0, duration)
-        self.slow_fraction = max(0.0, slow_fraction)
-
-    def apply(self, spell: Spell, target: Player) -> None:
-        """Apply a ``SlowStatus`` if configured with non-zero values."""
-
-        if self.duration <= 0 or self.slow_fraction <= 0:
-            return
-        target.add_status(SlowStatus(self.duration, self.slow_fraction))
-
 class FrozenEffect(SpellEffect):
     def __init__(self, duration: float) -> None:
-        """Store the freeze duration."""
+        """Store how long the target should be frozen in place."""
 
         self.duration = max(0.0, duration)
 
     def apply(self, spell: Spell, target: Player) -> None:
-        """Stop target movement by applying ``FrozenStatus``."""
+        """Apply a movement-stopping ``FrozenStatus`` if duration is valid."""
 
         if self.duration <= 0:
             return
         target.add_status(FrozenStatus(self.duration))
+
+class ElectrocutedEffect(SpellEffect):
+    def __init__(self, duration: float, *, pulse_interval: float = 0.3, stun_ratio: float = 0.65) -> None:
+        """Blinking immobilization that toggles movement on and off."""
+
+        self.duration = max(0.0, duration)
+        self.pulse_interval = max(0.05, pulse_interval)
+        self.stun_ratio = max(0.0, min(1.0, stun_ratio))
+
+    def apply(self, spell: Spell, target: Player) -> None:
+        """Apply an ``ElectrocutedStatus`` with pulsed movement locks."""
+
+        if self.duration <= 0:
+            return
+        target.add_status(ElectrocutedStatus(self.duration, self.pulse_interval, self.stun_ratio))

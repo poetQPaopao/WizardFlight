@@ -5,7 +5,7 @@ from typing import Sequence
 from .base_spell import BaseSpell
 from .behaviors import *
 from .core import SpellDefinition, SpellStats
-from .effects import BurnEffect, DamageEffect, KnockbackEffect, SlowEffect
+from .effects import BurnEffect, DamageEffect, KnockbackEffect, FrozenEffect, ElectrocutedEffect
 from .visuals import (
     LightningBoltVisual,
     PulsingRingVisual,
@@ -21,7 +21,7 @@ import pygame
 def build_fire_bolt() -> SpellDefinition:
     """Construct the default Fire Bolt spell definition."""
 
-    stats = SpellStats(damage=20.0, speed=400.0, cost=25.0, radius=40.0, lifetime=5.0, cooldown=1)
+    stats = SpellStats(damage=30.0, speed=450.0, cost=25.0, radius=40.0, lifetime=5.0, cooldown=1.5)
     base = BaseSpell(
         name="Fire Bolt",
         stats=stats,
@@ -33,10 +33,11 @@ def build_fire_bolt() -> SpellDefinition:
         effect_factory=lambda: [
             DamageEffect(stats.damage),
             BurnEffect(duration=2, dps=5.0),
-            KnockbackEffect(force=200.0),
+            KnockbackEffect(force=150.0),
         ],
         visual_factory=lambda: SimpleOrbVisual(color=(255, 100, 23), trail_color=(255, 185, 150), trail_length=20),
         voice_triggers=("fire", "fire bolt", "fireball", "flame"),
+        sound_path="assets/sound_effects/Fireball.mp3",
     )
     definition = base.to_definition()
     definition.icon = _create_spell_icon("Fire Bolt", (255, 100, 23))
@@ -44,9 +45,9 @@ def build_fire_bolt() -> SpellDefinition:
 
 
 def build_frost_orb() -> SpellDefinition:
-    """Return the Frost Orb definition featuring slow and knockback."""
+    """Return the Frost Orb definition featuring a hard freeze and knockback."""
 
-    stats = SpellStats(damage=10.0, speed=550.0, cost=18.0, radius=25.0, lifetime=3.0, cooldown=0.6)
+    stats = SpellStats(damage=10.0, speed=550.0, cost=18.0, radius=25.0, lifetime=3.0, cooldown=0.8)
     return SpellDefinition(
         name="Frost Orb",
         stats=stats,
@@ -57,18 +58,19 @@ def build_frost_orb() -> SpellDefinition:
         ],
         effect_factory=lambda: [
             DamageEffect(stats.damage),
-            SlowEffect(duration=2, slow_fraction=0.3),
+            FrozenEffect(duration=1),
         ],
         visual_factory=lambda: SimpleOrbVisual(color=(150, 220, 255), trail_color=(90, 190, 255)),
         voice_triggers=("frost", "frost orb", "freeze", "ice", "ice bolt"),
         icon=_create_spell_icon("Frost Orb", (150, 220, 255)),
+        sound_path="assets/sound_effects/Ice Bolt.mp3",
     )
 
 
 def build_storm_spear() -> SpellDefinition:
-    """Fast, jittery lightning bolt that slows on hit."""
+    """Fast, jittery lightning bolt that applies a pulsing stun."""
 
-    stats = SpellStats(damage=10.0, speed=520.0, cost=22.0, radius=25.0, lifetime=2.2, cooldown=0.8)
+    stats = SpellStats(damage=10.0, speed=600.0, cost=22.0, radius=25.0, lifetime=2.2, cooldown=0.8)
     return SpellDefinition(
         name="Storm Spear",
         stats=stats,
@@ -79,11 +81,13 @@ def build_storm_spear() -> SpellDefinition:
         ],
         effect_factory=lambda: [
             DamageEffect(stats.damage),
-            SlowEffect(duration=1, slow_fraction=0.8),
+            ElectrocutedEffect(duration=3),
         ],
         visual_factory=lambda: LightningBoltVisual(color=(210, 235, 255), glow_color=(120, 170, 255)),
         voice_triggers=("lightning", "storm", "storm spear", "thunder", "zap"),
         icon=_create_spell_icon("Storm Spear", (255, 255, 100)),
+        sound_path="assets/sound_effects/Lightning Magic 1.mp3",
+        sound_volume=0.9,
     )
 
 
@@ -96,7 +100,7 @@ def build_arcane_nova() -> SpellDefinition:
         cost=70.0,
         radius=60.0,
         lifetime=2,
-        cooldown=10,
+        cooldown=8,
         max_hits=10,
     )
     return SpellDefinition(
@@ -109,12 +113,13 @@ def build_arcane_nova() -> SpellDefinition:
             CollisionBehavior(),
         ],
         effect_factory=lambda: [
-            DamageEffect(stats.damage),
-            SlowEffect(duration=1.3, slow_fraction=0.35),
+            DamageEffect(stats.damage)
         ],
         visual_factory=lambda: PulsingRingVisual(inner_color=(195, 175, 255), outer_color=(120, 95, 160)),
         voice_triggers=("arcane", "nova", "pulse", "burst"),
         icon=_create_spell_icon("Arcane Nova", (195, 175, 255)),
+        sound_path="assets/sound_effects/Pulsing Magic Sound Effect.mp3",
+        sound_volume=0.7,
     )
 
 
@@ -126,21 +131,20 @@ def build_earth_boomerang() -> SpellDefinition:
         speed=400.0,
         cost=20.0,
         radius=35.0,
-        lifetime=5,
-        cooldown=0.65,
-        max_hits=2,
+        lifetime=4.5,
+        cooldown=0.65
     )
     return SpellDefinition(
         name="Earth Boomerang",
         stats=stats,
         behavior_factory=lambda: [
-            BoomerangBehavior(return_time=2, turn_rate=6.5),
+            BoomerangBehavior(return_time=2.25, turn_rate=6.5),
             LifetimeBehavior(),
             CollisionBehavior(),
         ],
         effect_factory=lambda: [
             DamageEffect(stats.damage),
-            KnockbackEffect(force=500.0),
+            KnockbackEffect(force=250.0),
         ],
         visual_factory=lambda: ShardVisual(
             color=(185, 155, 105),
@@ -150,6 +154,8 @@ def build_earth_boomerang() -> SpellDefinition:
         ),
         voice_triggers=("earth", "boomerang", "stone", "return"),
         icon=_create_spell_icon("Earth Boomerang", (185, 155, 105)),
+        sound_path="assets/sound_effects/Spear Thrust 6.mp3",
+        sound_volume=0.85,
     )
 
 
@@ -160,7 +166,7 @@ def build_healing_wave() -> SpellDefinition:
     # - Does not move (speed=0)
     # - Lasts for 1.0 second (lifetime=1.0)
     # - Heals the caster (or anyone in range)
-    stats = SpellStats(damage=-5.0, speed=0.0, cost=20.0, radius=100.0, lifetime=1.0, cooldown=3.0, max_hits=5)
+    stats = SpellStats(damage=-40.0, speed=0.0, cost=20.0, radius=100.0, lifetime=1.0, cooldown=5.0)
     return SpellDefinition(
         name="Healing Wave",
         stats=stats,
@@ -177,6 +183,8 @@ def build_healing_wave() -> SpellDefinition:
         ),
         voice_triggers=("heal", "healing", "healing wave"),
         icon=_create_spell_icon("Healing Wave", (100, 255, 100)),
+        sound_path="assets/sound_effects/Healing Magic 4.mp3",
+        sound_volume=0.8,
     )
 
 

@@ -244,12 +244,12 @@ class FlyingDemoGame:
         if not self._voice_manager.setup_audio_inputs(self.players):
             self._running = False
             return False
-        if self._running:
-            self._custom_spell_creator = CustomSpellCreator(
-                players=self.players,
-                spell_library=self._spell_library,
-            )
-            self._custom_spell_creator.run()
+        # if self._running:
+        #     self._custom_spell_creator = CustomSpellCreator(
+        #         players=self.players,
+        #         spell_library=self._spell_library,
+        #     )
+        #     self._custom_spell_creator.run()
         return self._running
 
     def _reset_round_state(self) -> None:

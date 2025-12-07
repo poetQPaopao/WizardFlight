@@ -90,6 +90,8 @@ class SpellCaster:
             return False
             
         manager.spawn(spell)
+        if hasattr(definition, "play_sound"):
+            definition.play_sound()
         self.cooldowns[spell_name] = definition.stats.cooldown
         return True
 

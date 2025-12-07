@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from .behaviors import BoundsBehavior, CollisionBehavior, LinearMovementBehavior, LifetimeBehavior, SpellBehavior
@@ -21,6 +22,8 @@ class BaseSpell:
         behavior_factory: Optional[Callable[[], list[SpellBehavior]]] = None,
         friendly_fire: bool = False,
         voice_triggers: Optional[Sequence[str]] = None,
+        sound_path: str | Path | None = None,
+        sound_volume: float = 0.8,
     ) -> None:
         """Store factories and defaults that drive derived spell definitions."""
 
@@ -32,6 +35,8 @@ class BaseSpell:
         self._behavior_factory = behavior_factory
         self._friendly_fire = friendly_fire
         self._voice_triggers = tuple(voice_triggers or ())
+        self._sound_path = sound_path
+        self._sound_volume = sound_volume
 
     def _build_behaviors(self) -> list[SpellBehavior]:
         """Construct default behaviors when no custom factory is provided."""
@@ -56,4 +61,6 @@ class BaseSpell:
             effect_factory=self._effect_factory,
             visual_factory=self._visual_factory,
             voice_triggers=self._voice_triggers,
+            sound_path=self._sound_path,
+            sound_volume=self._sound_volume,
         )

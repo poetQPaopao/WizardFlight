@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import math
+import random
 from typing import Optional, Sequence, Tuple, Union, TYPE_CHECKING
 
 import pygame
 
 from controller import ControlScheme
 from spell_system.casting import SpellCaster
-from spell_system.core import SpellDefinition
+from spell_system.core import SpellDefinition, load_sound_variants
 from spell_system.status_effects import StatusEffect
 
 if TYPE_CHECKING:  # pragma: no cover - typing helpers
@@ -72,8 +73,15 @@ class Player(pygame.sprite.Sprite):
         self._aim_direction = pygame.Vector2(1, 0)
         self._speed_multiplier = 1.0
         self._status_effects: list[StatusEffect] = []
+        self._status_tint: tuple[int, int, int] | None = None
+        self._status_tint_strength = 0.0
+        self._damage_flash_timer = 0.0
+        self._damage_flash_duration = 0.12
+        self._damage_flash_min_amount = 1.0
         self.knockback_drag = 4.5
         self.alive = True
+        self._hurt_sounds: list[pygame.mixer.Sound] | None = None
+        self._hurt_sound_path = "assets/sound_effects/Hurt Sound Effect.mp3"
 
         self.max_health = max(0.0, max_health)
         self.health = self.max_health
@@ -177,6 +185,7 @@ class Player(pygame.sprite.Sprite):
         """Advance the player each frame, including bobbing and tilt."""
         if dt < 0:
             dt = 0.0
+        self._tick_damage_flash(dt)
 
         if not self.alive:
             self._apply_visual_state(0.0)
@@ -226,6 +235,8 @@ class Player(pygame.sprite.Sprite):
             image = self._base_image
         else:
             image = pygame.transform.rotozoom(self._base_image, self._tilt_angle, 1.0)
+        image = self._apply_status_tint_to_image(image)
+        image = self._apply_damage_flash_to_image(image)
 
         desired_center = pygame.Vector2(self._position.x, self._position.y + bob_offset)
         rect = image.get_rect(center=desired_center)
@@ -237,6 +248,54 @@ class Player(pygame.sprite.Sprite):
 
         self.image = image
         self.rect = rect
+
+    def _apply_status_tint_to_image(self, image: pygame.Surface) -> pygame.Surface:
+        """Overlay any status-driven tint while preserving alpha."""
+
+        if not self._status_tint or self._status_tint_strength <= 0:
+            return image
+
+        r, g, b = self._status_tint
+        strength = max(0.0, min(1.0, self._status_tint_strength))
+        mask = pygame.mask.from_surface(image)
+        if mask.count() == 0:
+            return image
+        tinted = image.copy()
+
+        # Pull the sprite toward the tint color without flattening details.
+        multiplier = (
+            255 - int((255 - r) * strength),
+            255 - int((255 - g) * strength),
+            255 - int((255 - b) * strength),
+            255,
+        )
+        tint_surface = pygame.Surface(tinted.get_size(), pygame.SRCALPHA)
+        tint_surface.fill(multiplier)
+        tinted.blit(tint_surface, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+
+        glow_alpha = int(90 * strength)
+        if glow_alpha > 0:
+            glow = mask.to_surface(setcolor=(r, g, b, glow_alpha), unsetcolor=(0, 0, 0, 0))
+            tinted.blit(glow, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+
+        return tinted
+
+    def _apply_damage_flash_to_image(self, image: pygame.Surface) -> pygame.Surface:
+        """Add a quick additive flash overlay when recently damaged."""
+
+        if self._damage_flash_timer <= 0 or self._damage_flash_duration <= 0:
+            return image
+
+        mask = pygame.mask.from_surface(image)
+        if mask.count() == 0:
+            return image
+
+        strength = max(0.0, min(1.0, self._damage_flash_timer / self._damage_flash_duration))
+        flash_color = (255, 120, 120, int(200 * strength))
+        flash = mask.to_surface(setcolor=flash_color, unsetcolor=(0, 0, 0, 0))
+        flashed = image.copy()
+        flashed.blit(flash, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+        return flashed
 
     def _set_sprite_variants(self, sprite: pygame.Surface) -> None:
         """Cache left/right facing versions of the current sprite."""
@@ -254,6 +313,8 @@ class Player(pygame.sprite.Sprite):
 
         if amount <= 0 or not self.alive:
             return
+        self._play_hurt_sound(amount)
+        self._trigger_damage_flash(amount)
         self.health = max(0.0, self.health - amount)
         if self.health <= 0 and self.alive:
             self.health = 0.0
@@ -265,6 +326,27 @@ class Player(pygame.sprite.Sprite):
         if amount <= 0 or not self.alive:
             return
         self.health = min(self.max_health, self.health + amount)
+
+    def _play_hurt_sound(self, damage: float) -> None:
+        """Play a random hurt clip with volume scaled to incoming damage."""
+
+        if damage <= 0:
+            return
+        max_health = max(1.0, self.max_health)
+        # Map damage ratio to a 0.3-1.0 volume range for audibility.
+        ratio = max(0.0, min(1.0, (damage / max_health) * 1.4))
+        volume = 0.3 + ratio * 0.7
+        sounds = self._hurt_sounds or load_sound_variants(self._hurt_sound_path, 5, volume)
+        if not sounds:
+            return
+        self._hurt_sounds = sounds
+        sound = random.choice(sounds)
+        sound.set_volume(volume)
+        try:
+            sound.play()
+        except Exception:
+            # Audio playback can fail on systems without configured output.
+            pass
 
     def apply_knockback(self, impulse: pygame.Vector2) -> None:
         """Additive knockback impulse that decays via drag over time."""
@@ -278,6 +360,21 @@ class Player(pygame.sprite.Sprite):
         """Clamp the active speed multiplier against the provided value."""
 
         self._speed_multiplier = min(self._speed_multiplier, max(0.0, multiplier))
+
+    def apply_status_tint(self, color: Color, *, intensity: float = 0.6) -> None:
+        """Request a temporary tint overlay driven by an active status."""
+
+        intensity = max(0.0, min(1.0, intensity))
+        if intensity <= 0:
+            return
+
+        def clamp(component: float) -> int:
+            return max(0, min(255, int(component)))
+
+        r, g, b = clamp(color[0]), clamp(color[1]), clamp(color[2])
+        if self._status_tint is None or intensity > self._status_tint_strength:
+            self._status_tint = (r, g, b)
+            self._status_tint_strength = intensity
 
     def add_status(self, effect: StatusEffect) -> None:
         """Queue a status effect so its ``tick`` method runs each update."""
@@ -455,6 +552,8 @@ class Player(pygame.sprite.Sprite):
         """Tick active status effects and discard expired ones."""
 
         self._speed_multiplier = 1.0
+        self._status_tint = None
+        self._status_tint_strength = 0.0
         if not self._status_effects:
             return
         survivors: list[StatusEffect] = []
@@ -473,6 +572,20 @@ class Player(pygame.sprite.Sprite):
         if self._knockback_velocity.length_squared() < 1e-2:
             self._knockback_velocity = pygame.Vector2()
 
+    def _tick_damage_flash(self, dt: float) -> None:
+        """Count down the hit flash timer."""
+
+        if self._damage_flash_timer <= 0 or dt <= 0:
+            return
+        self._damage_flash_timer = max(0.0, self._damage_flash_timer - dt)
+
+    def _trigger_damage_flash(self, amount: float) -> None:
+        """Start the brief hit flash when meaningful damage is taken."""
+
+        if amount < self._damage_flash_min_amount or self._damage_flash_duration <= 0:
+            return
+        self._damage_flash_timer = self._damage_flash_duration
+
     @property
     def velocity(self) -> pygame.Vector2:
         """Read-only access to the current velocity."""
@@ -488,6 +601,8 @@ class Player(pygame.sprite.Sprite):
         self._knockback_velocity = pygame.Vector2()
         self._current_velocity = pygame.Vector2()
         self._status_effects.clear()
+        self._status_tint = None
+        self._status_tint_strength = 0.0
         self._float_phase = 0.0
         self._tilt_angle = 0.0
         self._apply_visual_state(0.0)
