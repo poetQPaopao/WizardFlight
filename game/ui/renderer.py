@@ -11,6 +11,13 @@ if TYPE_CHECKING:  # pragma: no cover - runtime import not required
     from background import ParallaxBackground
 
 BACKGROUND = (18, 18, 28)
+SPELL_CARD_BG = (24, 26, 40)
+SPELL_CARD_BORDER = (70, 70, 95)
+SPELL_CARD_ACTIVE = (255, 210, 125)
+SPELL_CARD_TEXT = (225, 225, 235)
+SPELL_CARD_SECONDARY = (160, 190, 255)
+SPELL_READY = (120, 220, 170)
+SPELL_COOLDOWN = (255, 140, 110)
 
 
 def render_frame(
@@ -36,6 +43,7 @@ def render_frame(
     for player in players:
         screen.blit(player.image, player.rect)
     draw_health(screen, players, font)
+    draw_spell_loadouts(screen, players, font)
     if game_over:
         render_game_over_overlay(screen, font, winner_name, title_font)
     pygame.display.flip()
@@ -73,6 +81,117 @@ def draw_health(surface: pygame.Surface, players: Sequence[Player], font: pygame
         mana_label = font.render(f"{player.mana:05.1f} mp", True, (220, 220, 235))
         mana_pos = (x, mana_y + bar_height + 2) if column == 0 else (x + bar_width - mana_label.get_width(), mana_y + bar_height + 2)
         surface.blit(mana_label, mana_pos)
+
+
+def draw_spell_loadouts(surface: pygame.Surface, players: Sequence[Player], font: pygame.font.Font) -> None:
+    """Render the equipped spells for each player with cooldown feedback."""
+
+    if not players:
+        return
+
+    margin = 26
+    card_height = 46
+    gap = 10
+    half_width = surface.get_width() // 2
+    panel_width = half_width - margin * 2
+    panel_bottom = surface.get_height() - 24
+
+    layouts = []
+    for idx, player in enumerate(players):
+        spell_defs = list(getattr(player, "spellbook", ()))
+        if not spell_defs:
+            continue
+
+        column = idx % 2
+        cards_per_row = min(3, len(spell_defs))
+        available_width = panel_width - gap * (cards_per_row - 1)
+        card_width = max(120, int(available_width / max(1, cards_per_row)))
+        row_height = card_height + gap
+        rows = (len(spell_defs) + cards_per_row - 1) // cards_per_row
+        panel_height = rows * row_height - gap
+        layouts.append(
+            {
+                "player": player,
+                "spells": spell_defs,
+                "column": column,
+                "row_index": idx // 2,
+                "cards_per_row": cards_per_row,
+                "card_width": card_width,
+                "row_height": row_height,
+                "rows": rows,
+                "panel_height": panel_height,
+            }
+        )
+
+    if not layouts:
+        return
+
+    row_gap = 18
+    row_count = 1 + max(layout["row_index"] for layout in layouts)
+    row_heights = [
+        max(layout["panel_height"] for layout in layouts if layout["row_index"] == row) for row in range(row_count)
+    ]
+
+    current_bottom = panel_bottom
+    for row_idx in range(row_count):
+        row_bottom = current_bottom
+        for layout in (layout for layout in layouts if layout["row_index"] == row_idx):
+            x_origin = margin if layout["column"] == 0 else half_width + margin
+            y_origin = row_bottom - layout["panel_height"]
+            player = layout["player"]
+            active_name = player.current_spell_name() if hasattr(player, "current_spell_name") else None
+            cooldown_lookup = getattr(player, "spell_cooldown", lambda name: 0.0)
+
+            for spell_idx, definition in enumerate(layout["spells"]):
+                row = spell_idx // layout["cards_per_row"]
+                col = spell_idx % layout["cards_per_row"]
+                x = x_origin + col * (layout["card_width"] + gap)
+                y = y_origin + row * layout["row_height"]
+                card_rect = pygame.Rect(int(x), int(y), int(layout["card_width"]), card_height)
+
+                pygame.draw.rect(surface, SPELL_CARD_BG, card_rect, border_radius=8)
+                border_color = SPELL_CARD_ACTIVE if definition.name == active_name else SPELL_CARD_BORDER
+                pygame.draw.rect(surface, border_color, card_rect, width=2, border_radius=8)
+
+                cooldown = float(cooldown_lookup(definition.name))
+                stats = getattr(definition, "stats", None)
+                max_cooldown = max(0.001, getattr(stats, "cooldown", 0.0))
+                cooldown_ratio = max(0.0, min(1.0, cooldown / max_cooldown))
+
+                if cooldown > 0:
+                    overlay_width = max(1, int(card_rect.width * cooldown_ratio))
+                    overlay = pygame.Surface((overlay_width, card_rect.height), pygame.SRCALPHA)
+                    overlay.fill((SPELL_COOLDOWN[0], SPELL_COOLDOWN[1], SPELL_COOLDOWN[2], 70))
+                    surface.blit(overlay, card_rect.topleft)
+
+                name_label = font.render(definition.name, True, SPELL_CARD_TEXT)
+                surface.blit(name_label, (card_rect.x + 10, card_rect.y + 4))
+
+                cooldown_text = f"{cooldown:.1f}s" if cooldown > 0 else "Ready"
+                cooldown_color = SPELL_COOLDOWN if cooldown > 0 else SPELL_READY
+                cooldown_label = font.render(cooldown_text, True, cooldown_color)
+                cooldown_pos = cooldown_label.get_rect()
+                cooldown_pos.top = card_rect.y + 4
+                cooldown_pos.right = card_rect.right - 10
+                surface.blit(cooldown_label, cooldown_pos)
+
+                cost_label = font.render(f"{definition.stats.cost:.0f} mp", True, SPELL_CARD_SECONDARY)
+                cost_pos = cost_label.get_rect()
+                cost_pos.left = card_rect.x + 10
+                cost_pos.top = card_rect.y + 22
+                surface.blit(cost_label, cost_pos)
+
+                bar_rect = pygame.Rect(card_rect.x + 8, card_rect.bottom - 10, card_rect.width - 16, 6)
+                pygame.draw.rect(surface, (38, 38, 55), bar_rect, border_radius=3)
+                if cooldown > 0:
+                    fill_width = max(1, int(bar_rect.width * cooldown_ratio))
+                    cooldown_fill = pygame.Rect(bar_rect.x, bar_rect.y, fill_width, bar_rect.height)
+                    pygame.draw.rect(surface, SPELL_COOLDOWN, cooldown_fill, border_radius=3)
+                else:
+                    ready_fill = pygame.Rect(bar_rect.x, bar_rect.y, bar_rect.width, bar_rect.height)
+                    pygame.draw.rect(surface, SPELL_READY, ready_fill, border_radius=3)
+
+        current_bottom = row_bottom - row_heights[row_idx] - row_gap
 
 
 def render_game_over_overlay(
