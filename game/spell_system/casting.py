@@ -163,6 +163,11 @@ class SpellManager:
                 survivors.append(spell)
         self._spells = survivors
 
+    def set_bounds(self, bounds: pygame.Rect) -> None:
+        """Refresh the arena bounds without dropping active spells."""
+
+        self.bounds = pygame.Rect(bounds)
+
     def draw(self, surface: pygame.Surface) -> None:
         """Render every spell to the supplied surface."""
 

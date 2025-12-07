@@ -17,6 +17,7 @@ from spell_system import (
 from ui import render_frame
 
 SCREEN_SIZE = (1280, 720)
+MIN_SCREEN_SIZE = (640, 360)
 FPS = 60
 BOUNDS_PADDING = 8
 PLAYER_SPRITE_SIZE = (64, 64)
@@ -37,7 +38,9 @@ class FlyingDemoGame:
         """Initialize pygame surfaces, systems, and optional pose input."""
 
         pygame.init()
-        self._screen = pygame.display.set_mode(SCREEN_SIZE)
+        initial_size = self._initial_window_size()
+        self._display_flags = pygame.RESIZABLE
+        self._screen = pygame.display.set_mode(initial_size, self._display_flags)
         pygame.display.set_caption("Flying Player Demo")
         self._clock = pygame.time.Clock()
         self._font = pygame.font.SysFont("Inter", 20)
@@ -45,7 +48,7 @@ class FlyingDemoGame:
         self._world_bounds = self._screen.get_rect().inflate(-BOUNDS_PADDING * 2, -BOUNDS_PADDING * 2)
         self.players: list[Player] = []
         self._spell_manager: SpellManager = SpellManager(self._world_bounds)
-        self._background = ParallaxBackground(SCREEN_SIZE)
+        self._background = ParallaxBackground(initial_size)
         self._pose_system: Optional[PoseControlSystem] = None
         self._running = True
         self._pressed: Optional[Sequence[bool]] = None
@@ -57,6 +60,7 @@ class FlyingDemoGame:
         }
         self._custom_spell_creator: Optional[CustomSpellCreator] = None
         self._voice_manager = VoiceCommandManager()
+        self._apply_surface_size(initial_size)
         self._initialize_round()
         if use_pose_input:
             self._pose_system = PoseControlSystem(max_players=len(self.players))
@@ -70,13 +74,14 @@ class FlyingDemoGame:
         sprite = pygame.image.load(path).convert_alpha()
         return pygame.transform.scale(sprite, PLAYER_SPRITE_SIZE)
 
-    def _create_players(self) -> list[Player]:
+    def _create_players(self, surface_size: tuple[int, int]) -> list[Player]:
         """Instantiate the default keyboard-controlled player roster."""
 
+        width, height = surface_size
         return [
             Player(
                 name="Player 1",
-                position=(SCREEN_SIZE[0] * 0.25, SCREEN_SIZE[1] / 2),
+                position=(width * 0.25, height / 2),
                 controls=ControlScheme.wasd(),
                 spellbook=default_spellbook(),
                 color=(90, 200, 255),
@@ -85,7 +90,7 @@ class FlyingDemoGame:
             ),
             Player(
                 name="Player 2",
-                position=(SCREEN_SIZE[0] * 0.75, SCREEN_SIZE[1] / 2),
+                position=(width * 0.75, height / 2),
                 controls=ControlScheme.arrow_keys(),
                 spellbook=default_spellbook(),
                 color=(255, 180, 95),
@@ -116,6 +121,8 @@ class FlyingDemoGame:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self._running = False
+            elif event.type == pygame.VIDEORESIZE:
+                self._handle_resize(event.size)
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self._running = False
@@ -201,6 +208,43 @@ class FlyingDemoGame:
         if not cast_via_voice:
             player.handle_cast_input(pressed_cast, self._spell_manager)
 
+    def _handle_resize(self, size: tuple[int, int]) -> None:
+        width = max(MIN_SCREEN_SIZE[0], size[0])
+        height = max(MIN_SCREEN_SIZE[1], size[1])
+        new_size = (width, height)
+        self._screen = pygame.display.set_mode(new_size, self._display_flags)
+        self._apply_surface_size(new_size)
+
+    def _apply_surface_size(self, surface_size: tuple[int, int]) -> None:
+        """Refresh cached rects and visuals when the main surface changes."""
+
+        self._world_bounds = self._screen.get_rect().inflate(-BOUNDS_PADDING * 2, -BOUNDS_PADDING * 2)
+        if self._background:
+            self._background.resize(surface_size)
+        if self._spell_manager:
+            self._spell_manager.set_bounds(self._world_bounds)
+        for player in self.players:
+            player.set_bounds(self._world_bounds)
+
+    def _initial_window_size(self) -> tuple[int, int]:
+        """Return the desktop resolution so the window starts maximized."""
+
+        width, height = SCREEN_SIZE
+        desktop_sizes: list[tuple[int, int]] = []
+        try:
+            desktop_sizes = pygame.display.get_desktop_sizes()
+        except Exception:
+            desktop_sizes = []
+        if desktop_sizes:
+            width, height = desktop_sizes[0]
+        else:
+            info = pygame.display.Info()
+            width = getattr(info, "current_w", SCREEN_SIZE[0])
+            height = getattr(info, "current_h", SCREEN_SIZE[1])
+        width = max(MIN_SCREEN_SIZE[0], width)
+        height = max(MIN_SCREEN_SIZE[1], height)
+        return (width, height)
+
     def _render(self) -> None:
         """Draw arena bounds, sprites, spells, UI, and overlays."""
 
@@ -237,7 +281,7 @@ class FlyingDemoGame:
         self._reset_round_state()
 
     def _reset_round_objects(self) -> None:
-        self.players = self._create_players()
+        self.players = self._create_players(self._screen.get_size())
         self._spell_manager = SpellManager(self._world_bounds)
 
     def _prepare_voice_setup(self) -> bool:

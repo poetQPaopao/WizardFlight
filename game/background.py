@@ -33,9 +33,11 @@ class ParallaxBackground:
         drift_speeds = [0.0, 0.15, 0.18]
 
         self._layers: list[_Layer] = []
+        self._layer_sources: list[pygame.Surface] = []
         for idx, name in enumerate(names):
             path = base_dir / name
             image = pygame.image.load(str(path)).convert_alpha()
+            self._layer_sources.append(image)
             scaled = pygame.transform.smoothscale(image, screen_size)
             speed = speeds[idx] if idx < len(speeds) else speeds[-1]
             drift = drift_amplitudes[idx] if idx < len(drift_amplitudes) else drift_amplitudes[-1]
@@ -57,6 +59,15 @@ class ParallaxBackground:
                 layer.offset = (layer.offset + layer.speed * dt) % layer.image.get_width()
             if layer.drift_amplitude and layer.drift_speed:
                 layer.phase = (layer.phase + dt * layer.drift_speed) % math.tau
+
+    def resize(self, screen_size: Size) -> None:
+        """Scale every layer to match the resized display surface."""
+
+        if screen_size == self._screen_size:
+            return
+        self._screen_size = screen_size
+        for source, layer in zip(self._layer_sources, self._layers):
+            layer.image = pygame.transform.smoothscale(source, screen_size)
 
     def draw(self, surface: pygame.Surface) -> None:
         width, height = surface.get_size()

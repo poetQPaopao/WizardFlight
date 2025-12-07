@@ -21,7 +21,7 @@ import pygame
 def build_fire_bolt() -> SpellDefinition:
     """Construct the default Fire Bolt spell definition."""
 
-    stats = SpellStats(damage=30.0, speed=450.0, cost=25.0, radius=40.0, lifetime=5.0, cooldown=1.5)
+    stats = SpellStats(damage=30.0, speed=450.0, cost=25.0, radius=40.0, lifetime=5.0, cooldown=1)
     base = BaseSpell(
         name="Fire Bolt",
         stats=stats,
@@ -47,7 +47,7 @@ def build_fire_bolt() -> SpellDefinition:
 def build_frost_orb() -> SpellDefinition:
     """Return the Frost Orb definition featuring a hard freeze and knockback."""
 
-    stats = SpellStats(damage=10.0, speed=550.0, cost=18.0, radius=25.0, lifetime=3.0, cooldown=0.8)
+    stats = SpellStats(damage=10.0, speed=550.0, cost=18.0, radius=25.0, lifetime=3.0, cooldown=1.5)
     return SpellDefinition(
         name="Frost Orb",
         stats=stats,
@@ -70,7 +70,7 @@ def build_frost_orb() -> SpellDefinition:
 def build_storm_spear() -> SpellDefinition:
     """Fast, jittery lightning bolt that applies a pulsing stun."""
 
-    stats = SpellStats(damage=10.0, speed=600.0, cost=22.0, radius=25.0, lifetime=2.2, cooldown=0.8)
+    stats = SpellStats(damage=10.0, speed=600.0, cost=22.0, radius=25.0, lifetime=2.2, cooldown=1)
     return SpellDefinition(
         name="Storm Spear",
         stats=stats,
