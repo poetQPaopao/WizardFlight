@@ -17,10 +17,21 @@ class SpellBehavior:
 
 
 class LinearMovementBehavior(SpellBehavior):
-    """Advance the spell along its current velocity vector."""
+    """Advance the spell along its current velocity vector, aiming at the nearest opponent on spawn."""
+
+    def __init__(self) -> None:
+        self._aimed = False
 
     def update(self, context: SpellContext, dt: float) -> None:
-        """Apply displacement and sync pygame geometry."""
+        """Lock direction toward the closest opponent on first update, then move linearly."""
+
+        if not self._aimed:
+            target = _nearest_opponent(context.spell, context.players)
+            if target is not None:
+                offset = pygame.Vector2(target.rect.center) - context.spell.position
+                if offset.length_squared() > 0:
+                    context.spell.velocity = offset.normalize() * context.spell.stats.speed
+            self._aimed = True
 
         context.spell.position += context.spell.velocity * dt
         context.spell.sync_geometry()
@@ -52,7 +63,7 @@ class HomingMovmentBehavior(LinearMovementBehavior):
 
     def __init__(self, *, retarget_each_frame: bool = True, homing_strength: float = 0.05) -> None:
         """Control steering persistence and how aggressively we turn toward targets."""
-
+        super().__init__()
         self.retarget_each_frame = retarget_each_frame
         self.homing_strength = max(0.0, homing_strength)
         self._has_lock = False
@@ -78,29 +89,14 @@ class HomingMovmentBehavior(LinearMovementBehavior):
         super().update(context, dt)
 
 
-class TargetMovementBehavior(LinearMovementBehavior):
-    """Aim once at the nearest opponent, then fly straight without further steering."""
 
-    def __init__(self) -> None:
-        self._aimed = False
-
-    def update(self, context: SpellContext, dt: float) -> None:
-        """Lock direction toward the closest opponent on first update, then move linearly."""
-
-        if not self._aimed:
-            target = _nearest_opponent(context.spell, context.players)
-            if target is not None:
-                offset = pygame.Vector2(target.rect.center) - context.spell.position
-                if offset.length_squared() > 0:
-                    context.spell.velocity = offset.normalize() * context.spell.stats.speed
-            self._aimed = True
-        super().update(context, dt)
 
 
 class OscillatingMovementBehavior(LinearMovementBehavior):
     """Add a sinusoidal lateral wobble while moving forward."""
 
     def __init__(self, *, amplitude: float = 120.0, frequency: float = 2.5) -> None:
+        super().__init__()
         self.amplitude = max(0.0, amplitude)
         self.frequency = max(0.0, frequency)
         self._phase = 0.0
@@ -122,6 +118,7 @@ class BoomerangBehavior(LinearMovementBehavior):
     """Send the spell out, then arc it back toward the caster."""
 
     def __init__(self, *, return_time: float = 0.6, turn_rate: float = 6.0) -> None:
+        super().__init__()
         self.return_time = max(0.0, return_time)
         self.turn_rate = max(0.0, turn_rate)
         self._returning = False

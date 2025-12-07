@@ -36,6 +36,7 @@ class SimpleOrbVisual(SpellVisual):
         color: ColorValue,
         trail_color: ColorValue | None = None,
         outline_color: ColorValue | None = None,
+        trail_length: int = 15,
     ) -> None:
         """Configure orb color, optional distinct trail color, and outline.
 
@@ -47,7 +48,7 @@ class SimpleOrbVisual(SpellVisual):
         self.trail_color = pygame.Color(base_trail_color)
         self.outline_color = pygame.Color(outline_color) if outline_color is not None else None
         self._trail: list[pygame.Vector2] = []
-        self._trail_length = 12
+        self._trail_length = trail_length
 
     @staticmethod
     def _scaled_color(color: pygame.Color, scale: float) -> pygame.Color:

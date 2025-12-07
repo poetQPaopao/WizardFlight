@@ -49,7 +49,7 @@ class SlowStatus(StatusEffect):
         """Halve player speed by applying a multiplicative slow multiplier."""
 
         del dt
-        multiplier = max(0.05, 1.0 - self.slow_fraction)
+        multiplier = max(0.01, 1.0 - self.slow_fraction)
         player.apply_speed_multiplier(multiplier)
 
 

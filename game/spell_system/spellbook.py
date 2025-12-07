@@ -21,7 +21,7 @@ import pygame
 def build_fire_bolt() -> SpellDefinition:
     """Construct the default Fire Bolt spell definition."""
 
-    stats = SpellStats(damage=20.0, speed=300.0, cost=25.0, radius=40.0, lifetime=5.0, cooldown=0.45)
+    stats = SpellStats(damage=20.0, speed=400.0, cost=25.0, radius=40.0, lifetime=5.0, cooldown=1)
     base = BaseSpell(
         name="Fire Bolt",
         stats=stats,
@@ -35,7 +35,7 @@ def build_fire_bolt() -> SpellDefinition:
             BurnEffect(duration=2, dps=5.0),
             KnockbackEffect(force=200.0),
         ],
-        visual_factory=lambda: SimpleOrbVisual(color=(255, 100, 23), trail_color=(255, 185, 150)),
+        visual_factory=lambda: SimpleOrbVisual(color=(255, 100, 23), trail_color=(255, 185, 150), trail_length=20),
         voice_triggers=("fire", "fire bolt", "fireball", "flame"),
     )
     definition = base.to_definition()
@@ -46,7 +46,7 @@ def build_fire_bolt() -> SpellDefinition:
 def build_frost_orb() -> SpellDefinition:
     """Return the Frost Orb definition featuring slow and knockback."""
 
-    stats = SpellStats(damage=10.0, speed=500.0, cost=18.0, radius=14.0, lifetime=2.0, cooldown=0.6)
+    stats = SpellStats(damage=10.0, speed=550.0, cost=18.0, radius=25.0, lifetime=3.0, cooldown=0.6)
     return SpellDefinition(
         name="Frost Orb",
         stats=stats,
@@ -57,7 +57,7 @@ def build_frost_orb() -> SpellDefinition:
         ],
         effect_factory=lambda: [
             DamageEffect(stats.damage),
-            SlowEffect(duration=2.2, slow_fraction=0.7),
+            SlowEffect(duration=2, slow_fraction=0.3),
         ],
         visual_factory=lambda: SimpleOrbVisual(color=(150, 220, 255), trail_color=(90, 190, 255)),
         voice_triggers=("frost", "frost orb", "freeze", "ice", "ice bolt"),
@@ -68,7 +68,7 @@ def build_frost_orb() -> SpellDefinition:
 def build_storm_spear() -> SpellDefinition:
     """Fast, jittery lightning bolt that slows on hit."""
 
-    stats = SpellStats(damage=18.0, speed=520.0, cost=22.0, radius=16.0, lifetime=2.2, cooldown=0.55)
+    stats = SpellStats(damage=10.0, speed=520.0, cost=22.0, radius=25.0, lifetime=2.2, cooldown=0.8)
     return SpellDefinition(
         name="Storm Spear",
         stats=stats,
@@ -79,8 +79,7 @@ def build_storm_spear() -> SpellDefinition:
         ],
         effect_factory=lambda: [
             DamageEffect(stats.damage),
-            SlowEffect(duration=1.1, slow_fraction=0.3),
-            KnockbackEffect(force=120.0),
+            SlowEffect(duration=1, slow_fraction=0.8),
         ],
         visual_factory=lambda: LightningBoltVisual(color=(210, 235, 255), glow_color=(120, 170, 255)),
         voice_triggers=("lightning", "storm", "storm spear", "thunder", "zap"),
@@ -92,20 +91,20 @@ def build_arcane_nova() -> SpellDefinition:
     """Area pulse centered on the caster that swells and slows enemies."""
 
     stats = SpellStats(
-        damage=14.0,
+        damage=60.0,
         speed=0.0,
-        cost=28.0,
-        radius=48.0,
-        lifetime=1.4,
-        cooldown=2.5,
-        max_hits=12,
+        cost=70.0,
+        radius=60.0,
+        lifetime=2,
+        cooldown=10,
+        max_hits=10,
     )
     return SpellDefinition(
         name="Arcane Nova",
         stats=stats,
         behavior_factory=lambda: [
-            AnchorToCasterBehavior(forward_offset=10.0),
-            PulsingRadiusBehavior(min_scale=0.85, max_scale=2.1, pulse_speed=2.2),
+            AnchorToCasterBehavior(forward_offset=0.0),
+            PulsingRadiusBehavior(min_scale=0.85, max_scale=3, pulse_speed=2.5),
             LifetimeBehavior(),
             CollisionBehavior(),
         ],
@@ -123,25 +122,25 @@ def build_earth_boomerang() -> SpellDefinition:
     """Boomerangs back to the caster, knocking foes away on each pass."""
 
     stats = SpellStats(
-        damage=16.0,
-        speed=380.0,
-        cost=17.0,
-        radius=18.0,
-        lifetime=2.4,
+        damage=20.0,
+        speed=400.0,
+        cost=20.0,
+        radius=35.0,
+        lifetime=5,
         cooldown=0.65,
-        max_hits=3,
+        max_hits=2,
     )
     return SpellDefinition(
         name="Earth Boomerang",
         stats=stats,
         behavior_factory=lambda: [
-            BoomerangBehavior(return_time=0.6, turn_rate=6.5),
+            BoomerangBehavior(return_time=2, turn_rate=6.5),
             LifetimeBehavior(),
             CollisionBehavior(),
         ],
         effect_factory=lambda: [
             DamageEffect(stats.damage),
-            KnockbackEffect(force=200.0),
+            KnockbackEffect(force=500.0),
         ],
         visual_factory=lambda: ShardVisual(
             color=(185, 155, 105),

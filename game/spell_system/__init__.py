@@ -11,8 +11,7 @@ from .behaviors import (
     OscillatingMovementBehavior,
     PulsingRadiusBehavior,
     SpellBehavior,
-    HomingMovmentBehavior,
-    TargetMovementBehavior
+    HomingMovmentBehavior
 )
 from .casting import SpellCaster, SpellManager
 from .core import Spell, SpellContext, SpellDefinition, SpellStats
